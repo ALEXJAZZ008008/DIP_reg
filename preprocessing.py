@@ -17,188 +17,55 @@ import skimage.measure
 import elasticdeform
 
 import parameters
-import main
 
 rng = np.random.default_rng()
 
 
-def pad_data(data, pad_even_bool, new_resolution=None):
-    print("pad_data")
+def get_next_gemoetric_value(an, a0):
+    print("get_next_gemoetric_value")
 
-    if new_resolution is not None:
-        dimension_x_pad_1 = int((new_resolution[0] - data.shape[1]) / 2)
-        dimension_y_pad_1 = int((new_resolution[1] - data.shape[2]) / 2)
-        dimension_z_pad_1 = int((new_resolution[2] - data.shape[3]) / 2)
+    n = math.log2(an / a0) + 1
 
-        dimension_x_pad_2 = dimension_x_pad_1
-        dimension_y_pad_2 = dimension_y_pad_1
-        dimension_z_pad_2 = dimension_z_pad_1
-    else:
-        dimension_x_pad_1 = int((np.power(2, np.ceil(np.log(data.shape[1]) / np.log(2))) - data.shape[1]) / 2)
-        dimension_y_pad_1 = int((np.power(2, np.ceil(np.log(data.shape[2]) / np.log(2))) - data.shape[2]) / 2)
-        dimension_z_pad_1 = int((np.power(2, np.ceil(np.log(data.shape[3]) / np.log(2))) - data.shape[3]) / 2)
+    if not n.is_integer():
+        an = a0 * np.power(2, (math.ceil(n) - 1))
 
-        dimension_x_pad_2 = dimension_x_pad_1
-        dimension_y_pad_2 = dimension_y_pad_1
-        dimension_z_pad_2 = dimension_z_pad_1
-
-    if pad_even_bool:
-        if data.shape[1] % 2 > 0:
-            dimension_x_pad_1 = dimension_x_pad_1 + 1
-
-        if data.shape[2] % 2 > 0:
-            dimension_y_pad_1 = dimension_y_pad_1 + 1
-
-        if data.shape[3] % 2 > 0:
-            dimension_z_pad_1 = dimension_z_pad_1 + 1
-
-    if dimension_x_pad_1 > 0 or dimension_y_pad_1 > 0 or dimension_z_pad_1 > 0:
-        data = np.pad(data, ((0, 0),
-                             (dimension_x_pad_1, dimension_x_pad_2),
-                             (dimension_y_pad_1, dimension_y_pad_2),
-                             (dimension_z_pad_1, dimension_z_pad_2)), mode="reflect")
-
-    return data
+    return an
 
 
-def pad_data_upsample(data, resample_even_bool, new_resolution=None):
+def data_upsample(data, new_resolution=None):
     print("pad_data_resample")
+
+    geometric_sequence_a0 = 2
 
     for i in range(len(data)):
         data_copy = np.load(data[i], allow_pickle=True)
 
         data_copy = np.squeeze(data_copy)
 
-        if data_copy.ndim < 4:
-            data_copy = np.expand_dims(data_copy, 0)
-
         if new_resolution is not None:
-            dimension_x_upscale_factor = new_resolution[0] / data_copy.shape[1]
-            dimension_y_upscale_factor = new_resolution[1] / data_copy.shape[2]
-            dimension_z_upscale_factor = new_resolution[2] / data_copy.shape[3]
+            dimension_x_upscale_factor = new_resolution[0] / data_copy.shape[0]
+            dimension_y_upscale_factor = new_resolution[1] / data_copy.shape[1]
+            dimension_z_upscale_factor = new_resolution[2] / data_copy.shape[2]
         else:
             dimension_x_upscale_factor = \
-                np.power(2, np.ceil(np.log(data_copy.shape[1]) / np.log(2))) / data_copy.shape[1]
+                get_next_gemoetric_value(data_copy.shape[0], geometric_sequence_a0) / data_copy.shape[0]
             dimension_y_upscale_factor = \
-                np.power(2, np.ceil(np.log(data_copy.shape[2]) / np.log(2))) / data_copy.shape[2]
+                get_next_gemoetric_value(data_copy.shape[1], geometric_sequence_a0) / data_copy.shape[1]
             dimension_z_upscale_factor = \
-                np.power(2, np.ceil(np.log(data_copy.shape[3]) / np.log(2))) / data_copy.shape[3]
+                get_next_gemoetric_value(data_copy.shape[2], geometric_sequence_a0) / data_copy.shape[2]
 
-        upsample_factor = np.min([dimension_x_upscale_factor, dimension_y_upscale_factor, dimension_z_upscale_factor])
-
-        if upsample_factor > 1.0:
-            upsampled_data_copy = []
-
-            for j in range(len(data_copy)):
-                upsampled_data_copy.append(skimage.transform.pyramid_expand(data_copy[j], upscale=upsample_factor,
-                                                                            order=3, mode="mirror", multichannel=False,
-                                                                            preserve_range=True))
-
-            data_copy = np.asfarray(upsampled_data_copy)
-
-        if resample_even_bool:
-            dimension_x_zoom_factor = 1.0
-            dimension_y_zoom_factor = 1.0
-            dimension_z_zoom_factor = 1.0
-
-            if data_copy.shape[1] % 2 > 0:
-                dimension_x_zoom_factor = (data_copy.shape[1] - 1.0) / data_copy.shape[1]
-
-            if data_copy.shape[2] % 2 > 0:
-                dimension_y_zoom_factor = (data_copy.shape[2] - 1.0) / data_copy.shape[2]
-
-            if data_copy.shape[3] % 2 > 0:
-                dimension_z_zoom_factor = (data_copy.shape[3] - 1.0) / data_copy.shape[3]
-
-            if not np.isclose(dimension_x_zoom_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                    not np.isclose(dimension_y_zoom_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                    not np.isclose(dimension_z_zoom_factor, 1.0, rtol=0.0, atol=1e-05):
-                data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_zoom_factor, dimension_y_zoom_factor,
-                                                           dimension_z_zoom_factor), order=3, mode="mirror",
-                                               prefilter=True)
-
-        data_copy = pad_data(data_copy, not resample_even_bool, new_resolution)
+        if not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
+                not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
+                not np.isclose(dimension_z_upscale_factor, 1.0, rtol=0.0, atol=1e-05):
+            data_copy = scipy.ndimage.zoom(data_copy, (dimension_x_upscale_factor, dimension_y_upscale_factor,
+                                                       dimension_z_upscale_factor), order=3, mode="mirror",
+                                           prefilter=True)
 
         data_copy = np.expand_dims(data_copy, -1)
 
         np.save(data[i], data_copy)
 
     return data
-
-
-def update_cropping_window(data_copy, cropping_threshold, cropping):
-    if data_copy.ndim > 3:
-        data_copy = np.mean(data_copy, axis=0)
-
-    data_copy_x = np.sum(np.sum(data_copy, axis=2), axis=1)
-    data_copy_y = np.sum(np.sum(data_copy, axis=2), axis=0)
-    data_copy_z = np.sum(np.sum(data_copy, axis=1), axis=0)
-
-    data_copy_x_cropping = (np.argmax(data_copy_x > cropping_threshold),
-                            np.argmax(np.flip(data_copy_x) > cropping_threshold))
-    data_copy_y_cropping = (np.argmax(data_copy_y > cropping_threshold),
-                            np.argmax(np.flip(data_copy_y) > cropping_threshold))
-    data_copy_z_cropping = (np.argmax(data_copy_z > cropping_threshold),
-                            np.argmax(np.flip(data_copy_z) > cropping_threshold))
-
-    cropping = ((int(np.floor(np.min([cropping[0][0], data_copy_x_cropping[0]]))),
-                 int(np.floor(np.min([cropping[0][1], data_copy_x_cropping[1]])))),
-                (int(np.floor(np.min([cropping[1][0], data_copy_y_cropping[0]]))),
-                 int(np.floor(np.min([cropping[1][1], data_copy_y_cropping[1]])))),
-                (int(np.floor(np.min([cropping[2][0], data_copy_z_cropping[0]]))),
-                 int(np.floor(np.min([cropping[2][1], data_copy_z_cropping[1]])))))
-
-    return cropping
-
-
-def data_crop(data, cropping=None):
-    print("data_crop")
-
-    if cropping is None:
-        cropping_threshold = 1e-05
-
-        data_copy = np.load(data[0], allow_pickle=True)
-        data_copy = np.squeeze(data_copy)
-
-        if data_copy.ndim < 4:
-            data_copy = np.expand_dims(data_copy, 0)
-
-        cropping = ((int(np.floor(data_copy.shape[1] / 2)), int(np.floor(data_copy.shape[1] / 2))),
-                    (int(np.floor(data_copy.shape[2] / 2)), int(np.floor(data_copy.shape[2] / 2))),
-                    (int(np.floor(data_copy.shape[3] / 2)), int(np.floor(data_copy.shape[3] / 2))))
-
-        cropping = update_cropping_window(data_copy, cropping_threshold, cropping)
-
-        for i in range(1, len(data)):
-            data_copy = np.load(data[i], allow_pickle=True)
-            data_copy = np.squeeze(data_copy)
-
-            cropping = update_cropping_window(data_copy, cropping_threshold, cropping)
-
-    if cropping[0][0] > 0 or \
-            cropping[0][1] > 0 or \
-            cropping[1][0] > 0 or \
-            cropping[1][1] > 0 or \
-            cropping[2][0] > 0 or \
-            cropping[2][1] > 0:
-        for i in range(len(data)):
-            data_copy = np.load(data[i], allow_pickle=True)
-
-            data_copy = np.squeeze(data_copy)
-
-            if data_copy.ndim < 4:
-                data_copy = np.expand_dims(data_copy, 0)
-
-            data_copy = data_copy[:,
-                        cropping[0][0]:data_copy.shape[1] - cropping[0][1],
-                        cropping[1][0]:data_copy.shape[2] - cropping[1][1],
-                        cropping[2][0]:data_copy.shape[3] - cropping[2][1]]
-
-            data_copy = np.expand_dims(data_copy, -1)
-
-            np.save(data[i], data_copy)
-
-    return data, cropping
 
 
 def data_downsample(data, resample_even_bool, downsample_factor):
@@ -209,16 +76,13 @@ def data_downsample(data, resample_even_bool, downsample_factor):
 
         data_copy = np.squeeze(data_copy)
 
-        if data_copy.ndim < 4:
-            data_copy = np.expand_dims(data_copy, 0)
-
         if resample_even_bool:
             downsampled_data_copy = []
 
             for j in range(len(data_copy)):
                 downsampled_data_copy.append(skimage.transform.pyramid_reduce(data_copy[j], downscale=downsample_factor,
-                                                                              order=3, mode="mirror", multichannel=False,
-                                                                              preserve_range=True))
+                                                                              order=3, mode="mirror",
+                                                                              multichannel=False, preserve_range=True))
 
             data_copy = np.asfarray(downsampled_data_copy)
         else:
@@ -395,9 +259,9 @@ def elastic_deform_data(x_data, y_data):
 
     if elastic_sigma > 0.0:
         elastic_spacing = 5
-        points = [int(x_data.shape[1] / elastic_spacing),
-                  int(x_data.shape[2] / elastic_spacing),
-                  int(x_data.shape[3] / elastic_spacing)]
+        points = [int(x_data.shape[0] / elastic_spacing),
+                  int(x_data.shape[1] / elastic_spacing),
+                  int(x_data.shape[2] / elastic_spacing)]
 
         # pycharm gives incorrect type warning, hence turning it off
         # warning possible issues in the future
@@ -405,11 +269,11 @@ def elastic_deform_data(x_data, y_data):
             # noinspection PyTypeChecker
             [x_data, y_data] = \
                 elasticdeform.deform_random_grid([x_data, y_data], sigma=elastic_sigma, points=points, order=3,
-                                                 mode="mirror", prefilter=True, axis=[(1, 2, 3), (1, 2, 3)])
+                                                 mode="mirror", prefilter=True, axis=[(0, 1, 2), (0, 1, 2)])
         else:
             # noinspection PyTypeChecker
             x_data = elasticdeform.deform_random_grid(x_data, sigma=elastic_sigma, points=points, order=3,
-                                                      mode="mirror", prefilter=True, axis=[(1, 2, 3)])
+                                                      mode="mirror", prefilter=True, axis=[(0, 1, 2)])
 
     return x_data, y_data
 
@@ -520,7 +384,7 @@ def transform_data(x_data, y_data):
     rotate_bool = True
     translate_bool = True
 
-    origin_translation = [x_data.shape[1] / 2.0, x_data.shape[2] / 2.0, x_data.shape[3] / 2.0]
+    origin_translation = [x_data.shape[0] / 2.0, x_data.shape[1] / 2.0, x_data.shape[2] / 2.0]
 
     if scale_bool:
         min_scale = 0.9
@@ -537,10 +401,7 @@ def transform_data(x_data, y_data):
         max_rotation_degrees = 0.0
 
     if translate_bool:
-        if main.cluster_bool:
-            max_translate = 16
-        else:
-            max_translate = 4
+        max_translate = 16
     else:
         max_translate = 0
 
@@ -557,13 +418,13 @@ def transform_data(x_data, y_data):
     for i in range(len(x_data)):
         x_data[i] = \
             np.expand_dims(scipy.ndimage.affine_transform(
-                x_data[i].reshape((x_data.shape[1], x_data.shape[2], x_data.shape[3])),
+                x_data[i].reshape((x_data.shape[0], x_data.shape[1], x_data.shape[2])),
                 np.linalg.inv(srt_transformation_matrix), mode="mirror", prefilter=True), -1)
 
         if y_data is not None:
             y_data[i] = \
                 np.expand_dims(scipy.ndimage.affine_transform(
-                    y_data[i].reshape((y_data.shape[1], y_data.shape[2], x_data.shape[3])),
+                    y_data[i].reshape((y_data.shape[0], y_data.shape[1], x_data.shape[2])),
                     np.linalg.inv(srt_transformation_matrix), mode="mirror", prefilter=True), -1)
 
     return x_data, y_data
