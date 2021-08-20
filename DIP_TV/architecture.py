@@ -8,6 +8,7 @@ import tensorflow.keras as k
 import main
 import layers
 import loss
+import parameters
 
 
 def get_input(input_shape):
@@ -138,8 +139,13 @@ def get_model(input_shape):
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
-    model.compile(optimizer=k.optimizers.Adam(),
-                  loss={"output": k.losses.mean_squared_error}, loss_weights=[1.0],
-                  metrics=[loss.accuracy_correlation_coefficient])
+    if parameters.total_variation_bool:
+        model.compile(optimizer=k.optimizers.Adam(),
+                      loss={"output": loss.mean_square_error_total_variation_loss}, loss_weights=[1.0],
+                      metrics=[loss.accuracy_correlation_coefficient])
+    else:
+        model.compile(optimizer=k.optimizers.Adam(),
+                      loss={"output": loss.mean_squared_error}, loss_weights=[1.0],
+                      metrics=[loss.accuracy_correlation_coefficient])
 
     return model

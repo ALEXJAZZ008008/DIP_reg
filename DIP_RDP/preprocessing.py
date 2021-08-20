@@ -35,7 +35,7 @@ def get_next_geometric_value(an, a0):
 def data_upsample(data, new_resolution=None):
     print("pad_data_resample")
 
-    geometric_sequence_a0 = 2
+    geometric_sequence_a0 = 3
 
     for i in range(len(data)):
         data_copy = np.load(data[i], allow_pickle=True)

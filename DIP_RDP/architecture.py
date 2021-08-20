@@ -23,7 +23,7 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
                 lone_weight, dropout_amount):
     print("get_encoder")
 
-    layer_depth = [8, 16, 32]
+    layer_depth = [4, 8, 16]
     layer_kernel_size = [3, 3, 3]
     layer_layers = [2, 2, 2]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2)]
@@ -48,7 +48,7 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
             res_connections.append(x)
 
         if main.down_stride_bool:
-            if main.down_max_pool_too_bool:
+            if main.down_pool_too_bool:
                 x_1 = layers.get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, layer_depth[i],
                                                    (layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
                                                    layer_stride[i], ltwo_weight, lone_weight, gaussian_stddev,
@@ -56,11 +56,22 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
                                                    main.autoencoder_resnet_concatenate_bool,
                                                    main.autoencoder_densenet_bool)
 
-                x_2 = k.layers.AveragePooling3D(pool_size=(layer_kernel_size[i],
-                                                           layer_kernel_size[i],
-                                                           layer_kernel_size[i]),
-                                                strides=layer_stride[i],
-                                                padding="same")(x)
+                convolved_fov_bool, kernel_padding, kernel_groups, fov_loops, kernel_size, kernel_dilation, \
+                kernel_depth = layers.conv3D_scaling(x, layer_stride[i], False, (layer_kernel_size[i],
+                                                                                 layer_kernel_size[i],
+                                                                                 layer_kernel_size[i]), layer_depth[i],
+                                                     False, False, False)
+
+                if kernel_padding[0] > 0 or kernel_padding[1] > 0 or kernel_padding[2] > 0:
+                    x_2 = layers.ReflectionPadding3D(padding=kernel_padding)(x)
+                else:
+                    x_2 = x
+
+                x_2 = k.layers.MaxPooling3D(pool_size=(layer_kernel_size[i],
+                                                       layer_kernel_size[i],
+                                                       layer_kernel_size[i]),
+                                            strides=layer_stride[i],
+                                            padding="valid")(x_2)
 
                 if main.down_max_pool_too_concatenate_bool:
                     concatenate_depth = x.shape[-1]
@@ -70,8 +81,7 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
                     if gaussian_stddev > 0.0:
                         x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                    x = k.layers.ReLU(max_value=6.0,
-                                      negative_slope=0.2)(x)
+                    x = k.layers.ReLU(negative_slope=0.2)(x)
 
                     kernel_groups = layers.get_kernel_groups(x, grouped_bool, concatenate_depth)
 
@@ -84,8 +94,7 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
                     if gaussian_stddev > 0.0:
                         x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                    x = k.layers.ReLU(max_value=6.0,
-                                      negative_slope=0.2)(x)
+                    x = k.layers.ReLU(negative_slope=0.2)(x)
             else:
                 x = layers.get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, layer_depth[i],
                                                  (layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
@@ -94,7 +103,18 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
                                                  main.autoencoder_resnet_concatenate_bool,
                                                  main.autoencoder_densenet_bool)
         else:
-            x = k.layers.MaxPooling3D(pool_size=layer_stride[i], padding="same")(x)
+            convolved_fov_bool, kernel_padding, kernel_groups, fov_loops, kernel_size, kernel_dilation, \
+            kernel_depth = layers.conv3D_scaling(x, layer_stride[i], False, (layer_kernel_size[i],
+                                                                             layer_kernel_size[i],
+                                                                             layer_kernel_size[i]), layer_depth[i],
+                                                 False, False, False)
+
+            if kernel_padding[0] > 0 or kernel_padding[1] > 0 or kernel_padding[2] > 0:
+                x = layers.ReflectionPadding3D(padding=kernel_padding)(x)
+
+            x = k.layers.MaxPooling3D(pool_size=(layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
+                                      strides=layer_stride[i],
+                                      padding="valid")(x)
 
     return x, res_connections
 
@@ -103,7 +123,7 @@ def get_latent(x, grouped_bool, grouped_channel_shuffle_bool, gaussian_stddev, l
                dropout_amount):
     print("get_latent")
 
-    layer_depth = [8]
+    layer_depth = [32]
     layer_kernel_size = [3]
     layer_layers = [2]
 
@@ -123,7 +143,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                 gaussian_stddev, dropout_amount):
     print("get_decoder")
 
-    layer_depth = [32, 16, 8]
+    layer_depth = [16, 8, 4]
     layer_kernel_size = [3, 3, 3]
     layer_layers = [2, 2, 2]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2)]
@@ -146,11 +166,10 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                                                dilation_rate=(1, 1, 1),
                                                groups=1,
                                                padding="same",
-                                               kernel_initializer="he_uniform",
+                                               kernel_initializer="he_normal",
                                                bias_initializer=k.initializers.Constant(0.0),
                                                kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                               activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                               kernel_constraint=k.constraints.UnitNorm())(x)
+                                               activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
 
                 x_2 = k.layers.UpSampling3D(size=layer_stride[i])(x_2)
 
@@ -162,8 +181,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                     if gaussian_stddev > 0.0:
                         x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                    x = k.layers.ReLU(max_value=6.0,
-                                      negative_slope=0.2)(x)
+                    x = k.layers.ReLU(negative_slope=0.2)(x)
 
                     kernel_groups = layers.get_kernel_groups(x, grouped_bool, concatenate_depth)
 
@@ -177,8 +195,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                     if gaussian_stddev > 0.0:
                         x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                    x = k.layers.ReLU(max_value=6.0,
-                                      negative_slope=0.2)(x)
+                    x = k.layers.ReLU(negative_slope=0.2)(x)
             else:
                 x = layers.get_transpose_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool,
                                                            layer_depth[i], (layer_kernel_size[i],
@@ -195,11 +212,10 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                                          dilation_rate=(1, 1, 1),
                                          groups=1,
                                          padding="same",
-                                         kernel_initializer="he_uniform",
+                                         kernel_initializer="he_normal",
                                          bias_initializer=k.initializers.Constant(0.0),
                                          kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                         activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                         kernel_constraint=k.constraints.UnitNorm())(x)
+                                         activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
 
             x = k.layers.UpSampling3D(size=layer_stride[i])(x)
 
@@ -223,8 +239,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                 if gaussian_stddev > 0.0:
                     x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                x = k.layers.ReLU(max_value=6.0,
-                                  negative_slope=0.2)(x)
+                x = k.layers.ReLU(negative_slope=0.2)(x)
 
                 kernel_groups = layers.get_kernel_groups(x, grouped_bool, concatenate_depth)
 
@@ -237,8 +252,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                 if gaussian_stddev > 0.0:
                     x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                x = k.layers.ReLU(max_value=6.0,
-                                  negative_slope=0.2)(x)
+                x = k.layers.ReLU(negative_slope=0.2)(x)
 
         for j in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, layer_depth[i],
@@ -255,7 +269,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                         dilation_rate=(1, 1, 1),
                         groups=1,
                         padding="valid",
-                        kernel_initializer="glorot_normal",
+                        kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0),
                         name="output")(x)
 
@@ -286,7 +300,7 @@ def get_model(input_shape):
     grouped_bool = parameters.grouped_bool
     grouped_channel_shuffle_bool = parameters.grouped_channel_shuffle_bool
 
-    input_gaussian_stddev = 0.0
+    input_gaussian_stddev = parameters.input_gaussian_stddev
     gaussian_stddev = parameters.gaussian_stddev
     ltwo_weight = 0.0
     lone_weight = parameters.lone_weight
@@ -299,8 +313,8 @@ def get_model(input_shape):
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
-    model.compile(optimizer=k.optimizers.Nadam(global_clipnorm=1.0, clipvalue=1.0),
-                  loss={"output": k.losses.mean_squared_error}, loss_weights=[1.0],
+    model.compile(optimizer=k.optimizers.Nadam(clipvalue=6.0),
+                  loss={"output": loss.log_cosh}, loss_weights=[1.0],
                   metrics=[loss.accuracy_correlation_coefficient])
 
     return model

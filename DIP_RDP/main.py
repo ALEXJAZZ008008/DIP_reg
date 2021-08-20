@@ -54,12 +54,12 @@ autoencoder_unet_bool = parameters.autoencoder_unet_bool
 autoencoder_unet_concatenate_bool = parameters.autoencoder_unet_concatenate_bool
 
 down_stride_bool = parameters.down_stride_bool
-down_max_pool_too_bool = parameters.down_max_pool_too_bool
-down_max_pool_too_concatenate_bool = False
+down_pool_too_bool = parameters.down_pool_too_bool
+down_max_pool_too_concatenate_bool = parameters.down_max_pool_too_concatenate_bool
 
 up_stride_bool = parameters.up_stride_bool
 up_upsample_too_bool = parameters.up_upsample_too_bool
-up_upsample_too_concatenate_bool = False
+up_upsample_too_concatenate_bool = parameters.up_upsample_too_concatenate_bool
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -127,7 +127,8 @@ def get_train_data():
         if parameters.noise_input:
             current_volume = np.random.normal(size=current_volume.shape)
         else:
-            current_volume = scipy.ndimage.gaussian_filter(current_volume, mode="mirror")
+            if parameters.smoothed_input:
+                current_volume = scipy.ndimage.gaussian_filter(current_volume, sigma=1.5, mode="mirror")
 
         np.save("{0}/x_train/{1}.npy".format(output_path, str(i)), current_volume)
         x.append("{0}/x_train/{1}.npy".format(output_path, str(i)))

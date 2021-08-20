@@ -11,3 +11,6 @@ autoencoder_unet_concatenate_bool = False
 
 down_stride_bool = True
 up_stride_bool = False
+
+
+total_variation_bool = False

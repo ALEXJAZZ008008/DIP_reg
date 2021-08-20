@@ -108,19 +108,17 @@ def bottleneck_conv3D(x, depth, grouped_bool, grouped_channel_shuffle_bool, kern
                         dilation_rate=(1, 1, 1),
                         groups=kernel_groups,
                         padding="valid",
-                        kernel_initializer="he_uniform",
+                        kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0),
                         kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                        activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                        kernel_constraint=k.constraints.UnitNorm())(x)
+                        activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
     x = k.layers.BatchNormalization()(x)
 
     if not linear_bool:
         if gaussian_stddev > 0.0:
             x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-        x = k.layers.ReLU(max_value=6.0,
-                          negative_slope=0.2)(x)
+        x = k.layers.ReLU(negative_slope=0.2)(x)
 
     if x.shape[-1] > 1 and dropout_amount > 0.0:
         x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -145,19 +143,17 @@ def grouped_depthwise_conv3D(x, grouped_bool, grouped_channel_shuffle_bool, kern
                         dilation_rate=kernel_dilation,
                         groups=x.shape[-1],
                         padding="valid",
-                        kernel_initializer="he_uniform",
+                        kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0),
                         kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                        activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                        kernel_constraint=k.constraints.UnitNorm())(x)
+                        activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
     x = k.layers.BatchNormalization()(x)
 
     if not linear_bool:
         if gaussian_stddev > 0.0:
             x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-        x = k.layers.ReLU(max_value=6.0,
-                          negative_slope=0.2)(x)
+        x = k.layers.ReLU(negative_slope=0.2)(x)
 
     if x.shape[-1] > 1 and dropout_amount > 0.0:
         x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -256,18 +252,16 @@ def get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, depth, 
                                 dilation_rate=(1, 1, 1),
                                 groups=kernel_groups,
                                 padding="valid",
-                                kernel_initializer="he_uniform",
+                                kernel_initializer="he_normal",
                                 bias_initializer=k.initializers.Constant(0.0),
                                 kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                kernel_constraint=k.constraints.UnitNorm())(x)
+                                activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
             x = k.layers.BatchNormalization()(x)
 
             if gaussian_stddev > 0.0:
                 x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-            x = k.layers.ReLU(max_value=6.0,
-                              negative_slope=0.2)(x)
+            x = k.layers.ReLU(negative_slope=0.2)(x)
 
             if x.shape[-1] > 1 and dropout_amount > 0.0:
                 x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -284,18 +278,16 @@ def get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, depth, 
                                 dilation_rate=kernel_dilation,
                                 groups=kernel_groups,
                                 padding="valid",
-                                kernel_initializer="he_uniform",
+                                kernel_initializer="he_normal",
                                 bias_initializer=k.initializers.Constant(0.0),
                                 kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                kernel_constraint=k.constraints.UnitNorm())(x)
+                                activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
             x = k.layers.BatchNormalization()(x)
 
             if gaussian_stddev > 0.0:
                 x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-            x = k.layers.ReLU(max_value=6.0,
-                              negative_slope=0.2)(x)
+            x = k.layers.ReLU(negative_slope=0.2)(x)
 
             if x.shape[-1] > 1 and dropout_amount > 0.0:
                 x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -313,8 +305,7 @@ def get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, depth, 
                 if gaussian_stddev > 0.0:
                     x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                x = k.layers.ReLU(max_value=6.0,
-                                  negative_slope=0.2)(x)
+                x = k.layers.ReLU(negative_slope=0.2)(x)
 
                 kernel_groups = get_kernel_groups(x, grouped_bool, concatenate_depth)
 
@@ -335,8 +326,7 @@ def get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, depth, 
                 if gaussian_stddev > 0.0:
                     x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                x = k.layers.ReLU(max_value=6.0,
-                                  negative_slope=0.2)(x)
+                x = k.layers.ReLU(negative_slope=0.2)(x)
 
             if not densenet_bool:
                 res_connections = []
@@ -359,19 +349,17 @@ def bottleneck_conv3D_transpose(x, depth, grouped_bool, grouped_channel_shuffle_
                                  dilation_rate=(1, 1, 1),
                                  groups=kernel_groups,
                                  padding="same",
-                                 kernel_initializer="he_uniform",
+                                 kernel_initializer="he_normal",
                                  bias_initializer=k.initializers.Constant(0.0),
                                  kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                 activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                 kernel_constraint=k.constraints.UnitNorm())(x)
+                                 activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
     x = k.layers.BatchNormalization()(x)
 
     if not linear_bool:
         if gaussian_stddev > 0.0:
             x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-        x = k.layers.ReLU(max_value=6.0,
-                          negative_slope=0.2)(x)
+        x = k.layers.ReLU(negative_slope=0.2)(x)
 
     if x.shape[-1] > 1 and dropout_amount > 0.0:
         x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -393,19 +381,17 @@ def grouped_depthwise_conv3D_transpose(x, grouped_bool, grouped_channel_shuffle_
                                  dilation_rate=kernel_dilation,
                                  groups=x.shape[-1],
                                  padding="same",
-                                 kernel_initializer="he_uniform",
+                                 kernel_initializer="he_normal",
                                  bias_initializer=k.initializers.Constant(0.0),
                                  kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                 activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                 kernel_constraint=k.constraints.UnitNorm())(x)
+                                 activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
     x = k.layers.BatchNormalization()(x)
 
     if not linear_bool:
         if gaussian_stddev > 0.0:
             x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-        x = k.layers.ReLU(max_value=6.0,
-                          negative_slope=0.2)(x)
+        x = k.layers.ReLU(negative_slope=0.2)(x)
 
     if x.shape[-1] > 1 and dropout_amount > 0.0:
         x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -456,18 +442,16 @@ def get_transpose_convolution_layer(x, grouped_bool, grouped_channel_shuffle_boo
                                          dilation_rate=(1, 1, 1),
                                          groups=kernel_groups,
                                          padding="same",
-                                         kernel_initializer="he_uniform",
+                                         kernel_initializer="he_normal",
                                          bias_initializer=k.initializers.Constant(0.0),
                                          kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                         activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                         kernel_constraint=k.constraints.UnitNorm())(x)
+                                         activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
             x = k.layers.BatchNormalization()(x)
 
             if gaussian_stddev > 0.0:
                 x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-            x = k.layers.ReLU(max_value=6.0,
-                              negative_slope=0.2)(x)
+            x = k.layers.ReLU(negative_slope=0.2)(x)
 
             if x.shape[-1] > 1 and dropout_amount > 0.0:
                 x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -482,18 +466,16 @@ def get_transpose_convolution_layer(x, grouped_bool, grouped_channel_shuffle_boo
                                          dilation_rate=kernel_dilation,
                                          groups=kernel_groups,
                                          padding="same",
-                                         kernel_initializer="he_uniform",
+                                         kernel_initializer="he_normal",
                                          bias_initializer=k.initializers.Constant(0.0),
                                          kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
-                                         activity_regularizer=k.regularizers.l1(l1=lone_weight),
-                                         kernel_constraint=k.constraints.UnitNorm())(x)
+                                         activity_regularizer=k.regularizers.l1(l1=lone_weight))(x)
             x = k.layers.BatchNormalization()(x)
 
             if gaussian_stddev > 0.0:
                 x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-            x = k.layers.ReLU(max_value=6.0,
-                              negative_slope=0.2)(x)
+            x = k.layers.ReLU(negative_slope=0.2)(x)
 
             if x.shape[-1] > 1 and dropout_amount > 0.0:
                 x = k.layers.SpatialDropout3D(dropout_amount)(x)
@@ -511,8 +493,7 @@ def get_transpose_convolution_layer(x, grouped_bool, grouped_channel_shuffle_boo
                 if gaussian_stddev > 0.0:
                     x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                x = k.layers.ReLU(max_value=6.0,
-                                  negative_slope=0.2)(x)
+                x = k.layers.ReLU(negative_slope=0.2)(x)
 
                 kernel_groups = get_kernel_groups(x, grouped_bool, concatenate_depth)
 
@@ -534,8 +515,7 @@ def get_transpose_convolution_layer(x, grouped_bool, grouped_channel_shuffle_boo
                 if gaussian_stddev > 0.0:
                     x = k.layers.GaussianNoise(stddev=gaussian_stddev)(x)
 
-                x = k.layers.ReLU(max_value=6.0,
-                                  negative_slope=0.2)(x)
+                x = k.layers.ReLU(negative_slope=0.2)(x)
 
             if not densenet_bool:
                 res_connections = []
