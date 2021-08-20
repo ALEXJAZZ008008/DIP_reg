@@ -39,27 +39,18 @@ else:
 
 plot_bool = False
 save_plot_bool = True
-data_path = "{0}/DIP_RDP_data/xcat/".format(os.getcwd())
+data_path = "{0}/DIP_RDP_data/xcat/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output".format(os.getcwd())
 data_window_size = 47
 data_window_bool = False
 
 robust_bool = False
 
-autoencoder_resnet_bool = parameters.autoencoder_resnet_bool
-autoencoder_densenet_bool = False
-autoencoder_resnet_concatenate_bool = False
-
 autoencoder_unet_bool = parameters.autoencoder_unet_bool
 autoencoder_unet_concatenate_bool = parameters.autoencoder_unet_concatenate_bool
 
 down_stride_bool = parameters.down_stride_bool
-down_max_pool_too_bool = parameters.down_max_pool_too_bool
-down_max_pool_too_concatenate_bool = False
-
 up_stride_bool = parameters.up_stride_bool
-up_upsample_too_bool = parameters.up_upsample_too_bool
-up_upsample_too_concatenate_bool = False
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -262,13 +253,6 @@ def train_model():
     print("{0}\ttrain shape".format(str(input_shape)))
 
     model = architecture.get_model(input_shape)
-
-    iteration = 1
-
-    if not os.path.exists("{0}/accuracy".format(output_path)):
-        file = open("{0}/accuracy".format(output_path), "w")
-        file.close()
-
     model.summary()
 
     k.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
@@ -276,14 +260,13 @@ def train_model():
 
     print("Memory usage:\t{0}".format(str(get_model_memory_usage(1, model))))
 
+    iteration = 1
+
     while True:
         print("Iteration:\t{0}".format(str(iteration)))
 
-        x_iteration = preprocessing.get_noisy_data(x, robust_bool, output_path)
-        x_iteration, y_iteration = preprocessing.get_transformed_data(x_iteration, y, robust_bool, output_path)
-
-        x_train_iteration = np.asarray([np.load(x_iteration[0], allow_pickle=True)])
-        y_train_iteration = np.asarray([np.load(y_iteration[0], allow_pickle=True)])
+        x_train_iteration = np.asarray([np.load(x[0], allow_pickle=True)])
+        y_train_iteration = np.asarray([np.load(y[0], allow_pickle=True)])
 
         if float_sixteen_bool:
             x_train_iteration = x_train_iteration.astype(np.float16)

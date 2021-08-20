@@ -73,10 +73,21 @@ class ReflectionPadding3D(k.layers.Layer):
 def get_kernel_groups(x, grouped_bool, depth):
     print("get_kernel_groups")
 
-    if grouped_bool and x.shape[-1] > 1 and depth > 2:
-        kernel_groups = 2
+    current_groups = parameters.groups
 
-        if x.shape[-1] % kernel_groups > 0 or depth % kernel_groups > 0:
+    if grouped_bool:
+        if x.shape[-1] > 1:
+            while True:
+                if depth > current_groups:
+                    kernel_groups = current_groups
+
+                    break
+                else:
+                    current_groups = int(current_groups / 2.0)
+
+            if x.shape[-1] % kernel_groups > 0 or depth % kernel_groups > 0:
+                kernel_groups = 1
+        else:
             kernel_groups = 1
     else:
         kernel_groups = 1

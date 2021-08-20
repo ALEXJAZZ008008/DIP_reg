@@ -23,8 +23,7 @@ def get_encoder(x, grouped_bool, grouped_channel_shuffle_bool, input_gaussian_st
                 lone_weight, dropout_amount):
     print("get_encoder")
 
-    # layer_depth = [16, 32, 64]
-    layer_depth = []
+    layer_depth = [8, 16, 32]
     layer_kernel_size = [3, 3, 3]
     layer_layers = [2, 2, 2]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2)]
@@ -124,8 +123,7 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                 gaussian_stddev, dropout_amount):
     print("get_decoder")
 
-    # layer_depth = [64, 32, 16]
-    layer_depth = []
+    layer_depth = [32, 16, 8]
     layer_kernel_size = [3, 3, 3]
     layer_layers = [2, 2, 2]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2)]
@@ -142,7 +140,19 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                                                              main.autoencoder_resnet_concatenate_bool,
                                                              main.autoencoder_densenet_bool)
 
-                x_2 = k.layers.UpSampling3D(size=layer_stride[i])(x)
+                x_2 = k.layers.Conv3DTranspose(filters=layer_depth[i],
+                                               kernel_size=(1, 1, 1),
+                                               strides=(1, 1, 1),
+                                               dilation_rate=(1, 1, 1),
+                                               groups=1,
+                                               padding="same",
+                                               kernel_initializer="he_uniform",
+                                               bias_initializer=k.initializers.Constant(0.0),
+                                               kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
+                                               activity_regularizer=k.regularizers.l1(l1=lone_weight),
+                                               kernel_constraint=k.constraints.UnitNorm())(x)
+
+                x_2 = k.layers.UpSampling3D(size=layer_stride[i])(x_2)
 
                 if main.down_max_pool_too_concatenate_bool:
                     concatenate_depth = x.shape[-1]
@@ -162,21 +172,6 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                                                            ltwo_weight, lone_weight, False, gaussian_stddev,
                                                            dropout_amount)
                 else:
-                    if x_2.shape != x_1.shape:
-                        if gaussian_stddev > 0.0:
-                            x_2 = k.layers.GaussianNoise(stddev=gaussian_stddev)(x_2)
-
-                        x_2 = k.layers.ReLU(max_value=6.0,
-                                            negative_slope=0.2)(x_2)
-
-                        kernel_groups = layers.get_kernel_groups(x_2, grouped_bool, x_1.shape[-1])
-
-                        x_2 = layers.bottleneck_conv3D_transpose(x_2, x_1.shape[-1], grouped_bool,
-                                                                 grouped_channel_shuffle_bool,
-                                                                 kernel_groups, ltwo_weight,
-                                                                 lone_weight,
-                                                                 False, gaussian_stddev, dropout_amount)
-
                     x = k.layers.Add()([x_1, x_2])
 
                     if gaussian_stddev > 0.0:
@@ -194,6 +189,18 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                                                            main.autoencoder_resnet_concatenate_bool,
                                                            main.autoencoder_densenet_bool)
         else:
+            x = k.layers.Conv3DTranspose(filters=layer_depth[i],
+                                         kernel_size=(1, 1, 1),
+                                         strides=(1, 1, 1),
+                                         dilation_rate=(1, 1, 1),
+                                         groups=1,
+                                         padding="same",
+                                         kernel_initializer="he_uniform",
+                                         bias_initializer=k.initializers.Constant(0.0),
+                                         kernel_regularizer=k.regularizers.l2(l2=ltwo_weight),
+                                         activity_regularizer=k.regularizers.l1(l1=lone_weight),
+                                         kernel_constraint=k.constraints.UnitNorm())(x)
+
             x = k.layers.UpSampling3D(size=layer_stride[i])(x)
 
         if main.autoencoder_unet_bool:
@@ -234,14 +241,11 @@ def get_decoder(x, grouped_bool, grouped_channel_shuffle_bool, res_connections, 
                                   negative_slope=0.2)(x)
 
         for j in range(layer_layers[i]):
-            x = layers.get_transpose_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, layer_depth[i],
-                                                       (layer_kernel_size[i],
-                                                        layer_kernel_size[i],
-                                                        layer_kernel_size[i]),
-                                                       (1, 1, 1), ltwo_weight, lone_weight, gaussian_stddev,
-                                                       dropout_amount, main.autoencoder_resnet_bool,
-                                                       main.autoencoder_resnet_concatenate_bool,
-                                                       main.autoencoder_densenet_bool)
+            x = layers.get_convolution_layer(x, grouped_bool, grouped_channel_shuffle_bool, layer_depth[i],
+                                             (layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
+                                             (1, 1, 1), ltwo_weight, lone_weight, gaussian_stddev, dropout_amount,
+                                             main.autoencoder_resnet_bool, main.autoencoder_resnet_concatenate_bool,
+                                             main.autoencoder_densenet_bool)
 
     # output
     x = layers.ReflectionPadding3D(padding=(1, 1, 1))(x)

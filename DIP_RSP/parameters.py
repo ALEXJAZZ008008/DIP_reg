@@ -25,6 +25,7 @@ background_scale = 0.0
 
 grouped_bool = False
 grouped_channel_shuffle_bool = False
+groups = 4
 
 gaussian_stddev = 0.0
 lone_weight = 0.0

@@ -21,8 +21,8 @@ import parameters
 rng = np.random.default_rng()
 
 
-def get_next_gemoetric_value(an, a0):
-    print("get_next_gemoetric_value")
+def get_next_geometric_value(an, a0):
+    print("get_next_geometric_value")
 
     n = math.log2(an / a0) + 1
 
@@ -48,11 +48,11 @@ def data_upsample(data, new_resolution=None):
             dimension_z_upscale_factor = new_resolution[2] / data_copy.shape[2]
         else:
             dimension_x_upscale_factor = \
-                get_next_gemoetric_value(data_copy.shape[0], geometric_sequence_a0) / data_copy.shape[0]
+                get_next_geometric_value(data_copy.shape[0], geometric_sequence_a0) / data_copy.shape[0]
             dimension_y_upscale_factor = \
-                get_next_gemoetric_value(data_copy.shape[1], geometric_sequence_a0) / data_copy.shape[1]
+                get_next_geometric_value(data_copy.shape[1], geometric_sequence_a0) / data_copy.shape[1]
             dimension_z_upscale_factor = \
-                get_next_gemoetric_value(data_copy.shape[2], geometric_sequence_a0) / data_copy.shape[2]
+                get_next_geometric_value(data_copy.shape[2], geometric_sequence_a0) / data_copy.shape[2]
 
         if not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
                 not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
