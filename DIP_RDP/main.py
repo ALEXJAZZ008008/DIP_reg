@@ -270,7 +270,7 @@ def train_model():
 
     print("Memory usage:\t{0}".format(str(get_model_memory_usage(1, model))))
 
-    iteration = 1
+    iteration = 0
 
     while True:
         print("Iteration:\t{0}".format(str(iteration)))

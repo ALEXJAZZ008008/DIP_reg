@@ -4,6 +4,7 @@
 
 
 import tensorflow.keras as k
+from tqdm import trange
 
 import main
 import layers
@@ -30,8 +31,8 @@ def get_encoder(x):
     res_connections = []
 
     # layer 1
-    for i in range(len(layer_depth)):
-        for j in range(layer_layers[i]):
+    for i in trange(len(layer_depth)):
+        for j in trange(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i],
                                              (layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
                                              (1, 1, 1))
@@ -56,8 +57,8 @@ def get_latent(x):
     layer_layers = [2]
 
     # layer 1
-    for i in range(len(layer_depth)):
-        for j in range(layer_layers[i]):
+    for i in trange(len(layer_depth)):
+        for j in trange(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i],
                                              (layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
                                              (1, 1, 1))
@@ -73,7 +74,7 @@ def get_decoder(x, res_connections):
     layer_layers = [2, 2, 2]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2)]
 
-    for i in range(len(layer_depth)):
+    for i in trange(len(layer_depth)):
         if main.up_stride_bool:
             x = layers.get_transpose_convolution_layer(x, layer_depth[i],
                                                        (layer_kernel_size[i],
@@ -99,7 +100,7 @@ def get_decoder(x, res_connections):
             else:
                 x = k.layers.Add()([x, res_connections_x])
 
-        for j in range(layer_layers[i]):
+        for j in trange(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i],
                                              (layer_kernel_size[i], layer_kernel_size[i], layer_kernel_size[i]),
                                              (1, 1, 1))
@@ -140,11 +141,11 @@ def get_model(input_shape):
     model = k.Model(inputs=input_x, outputs=[output_x])
 
     if parameters.total_variation_bool:
-        model.compile(optimizer=k.optimizers.Adam(),
+        model.compile(optimizer=k.optimizers.SGD(learning_rate=0.01),
                       loss={"output": loss.mean_square_error_total_variation_loss}, loss_weights=[1.0],
                       metrics=[loss.accuracy_correlation_coefficient])
     else:
-        model.compile(optimizer=k.optimizers.Adam(),
+        model.compile(optimizer=k.optimizers.SGD(learning_rate=0.01),
                       loss={"output": loss.mean_squared_error}, loss_weights=[1.0],
                       metrics=[loss.accuracy_correlation_coefficient])
 
