@@ -7,7 +7,8 @@ import tensorflow as tf
 import tensorflow.keras as k
 
 
-def mean_squared_error(y_true, y_pred):
+# https://github.com/keras-team/keras/blob/master/keras/losses.py#L256-L310
+def mean_squared_error_loss(y_true, y_pred):
     y_true = tf.cast(y_true, dtype=tf.float64)
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
@@ -49,7 +50,7 @@ def mean_square_error_total_variation_loss(y_true, y_pred):
     y_true = tf.cast(y_true, dtype=tf.float64)
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
-    return ((1.0 * mean_squared_error(y_true, y_pred)) + (9e-08 * total_variation_loss(y_true, y_pred))) / 2.0
+    return ((1.0 * mean_squared_error_loss(y_true, y_pred)) + (9e-08 * total_variation_loss(y_true, y_pred))) / 2.0
 
 
 # https://stackoverflow.com/questions/46619869/how-to-specify-the-correlation-coefficient-as-the-loss-function-in-keras

@@ -7,8 +7,8 @@ import tensorflow as tf
 import tensorflow.keras as k
 
 
-# https://github.com/keras-team/keras/blob/master/keras/losses.py#L1174-L1204
-def mean_squared_error(y_true, y_pred):
+# https://github.com/keras-team/keras/blob/master/keras/losses.py#L256-L310
+def mean_squared_error_loss(y_true, y_pred):
     y_true = tf.cast(y_true, dtype=tf.float64)
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
@@ -21,9 +21,59 @@ def log_cosh(y_true, y_pred):
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
     def _logcosh(x):
-        return x + tf.math.softplus(-2. * x) - tf.cast(tf.math.log(2.), x.dtype)
+        return x + tf.math.softplus(-2. * x) - tf.cast(
+            tf.math.log(2.), x.dtype)
 
     return k.backend.mean(_logcosh(y_pred - y_true), axis=-1)
+
+
+# https://github.com/keras-team/keras/blob/master/keras/losses.py#L1850-L1888
+def kullback_leibler_loss(y_true, y_pred):
+    y_true = tf.cast(y_true, dtype=tf.float64)
+    y_pred = tf.cast(y_pred, dtype=tf.float64)
+
+    y_true = k.backend.clip(y_true, k.backend.epsilon(), 1)
+    y_pred = k.backend.clip(y_pred, k.backend.epsilon(), 1)
+
+    return tf.reduce_sum(y_true * tf.math.log(y_true / y_pred), axis=-1)
+
+
+# https://github.com/tensorflow/tensorflow/blob/v2.6.0/tensorflow/python/ops/image_ops_impl.py#L3213-L3282
+def total_variation(images):
+    # The input is a batch of images with shape:
+    # [batch, height, width, depth, channels].
+
+    # Calculate the difference of neighboring pixel-values.
+    # The images are shifted one pixel along the height, width and depth by slicing.
+    pixel_dif1 = images[:, 1:, :, :, :] - images[:, :-1, :, :, :]
+    pixel_dif2 = images[:, :, 1:, :, :] - images[:, :, :-1, :, :]
+    pixel_dif3 = images[:, :, :, 1:, :] - images[:, :, :, :-1, :]
+
+    # Only sum for the last 4 axis.
+    # This results in a 1-D tensor with the total variation for each image.
+    sum_axis = [1, 2, 3, 4]
+
+    # Calculate the total variation by taking the absolute value of the
+    # pixel-differences and summing over the appropriate axis.
+    tot_var = (tf.math.reduce_sum(tf.math.abs(pixel_dif1), axis=sum_axis) +
+               tf.math.reduce_sum(tf.math.abs(pixel_dif2), axis=sum_axis) +
+               tf.math.reduce_sum(tf.math.abs(pixel_dif3), axis=sum_axis))
+
+    return tot_var
+
+
+def total_variation_loss(y_true, y_pred):
+    y_true = tf.cast(y_true, dtype=tf.float64)
+    y_pred = tf.cast(y_pred, dtype=tf.float64)
+
+    return tf.reduce_sum(total_variation(y_pred))
+
+
+def mean_square_error_total_variation_loss(y_true, y_pred):
+    y_true = tf.cast(y_true, dtype=tf.float64)
+    y_pred = tf.cast(y_pred, dtype=tf.float64)
+
+    return ((1.0 * mean_squared_error_loss(y_true, y_pred)) + (9e-08 * total_variation_loss(y_true, y_pred))) / 2.0
 
 
 # https://stackoverflow.com/questions/46619869/how-to-specify-the-correlation-coefficient-as-the-loss-function-in-keras

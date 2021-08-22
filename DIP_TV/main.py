@@ -38,16 +38,8 @@ else:
     policy = k.mixed_precision.Policy(tf.dtypes.float32.name)
     k.mixed_precision.set_global_policy(policy)
 
-plot_bool = False
-save_plot_bool = True
 data_path = "{0}/DIP_RDP_data/xcat/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output".format(os.getcwd())
-
-autoencoder_unet_bool = parameters.autoencoder_unet_bool
-autoencoder_unet_concatenate_bool = parameters.autoencoder_unet_concatenate_bool
-
-down_stride_bool = parameters.down_stride_bool
-up_stride_bool = parameters.up_stride_bool
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -152,15 +144,7 @@ def get_train_data():
         np.save("{0}/y_train/{1}.npy".format(output_path, str(i)), current_array)
         y.append("{0}/y_train/{1}.npy".format(output_path, str(i)))
 
-        if parameters.noise_input:
-            if parameters.smooth_input:
-                current_array = (np.random.normal(size=current_array.shape) +
-                                 scipy.ndimage.gaussian_filter(current_array, sigma=5.0, mode="mirror")) / 2.0
-            else:
-                current_array = np.random.normal(size=current_array.shape)
-        else:
-            if parameters.smooth_input:
-                current_array = scipy.ndimage.gaussian_filter(current_array, sigma=5.0, mode="mirror")
+        current_array = np.random.normal(size=current_array.shape)
 
         np.save("{0}/x_train/{1}.npy".format(output_path, str(i)), current_array)
         x.append("{0}/x_train/{1}.npy".format(output_path, str(i)))
@@ -254,30 +238,13 @@ def get_model_memory_usage(batch_size, model):
     return gbytes
 
 
-def get_prediction(x, model, i, j):
-    print("get_prediction")
-
-    x_iteration = np.asarray([np.load(x[i], allow_pickle=True)[j]])
-
-    if float_sixteen_bool:
-        x_iteration = x_iteration.astype(np.float16)
-    else:
-        x_iteration = x_iteration.astype(np.float32)
-
-    x_prediction = model.predict_on_batch(x_iteration)
-
-    return x_prediction
-
-
-def get_evaluation_score(x_prediction, gt, i, j):
+def get_evaluation_score(x_prediction, gt):
     print("get_evaluation_score")
-
-    gt_iteration = np.asarray([np.load(gt[i], allow_pickle=True)[j]])
 
     if float_sixteen_bool:
         x_prediction = x_prediction.astype(np.float32)
 
-    accuracy = np.corrcoef(np.ravel(np.squeeze(gt_iteration)), np.ravel(np.squeeze(x_prediction)))[0, 1]
+    accuracy = np.corrcoef(np.ravel(np.squeeze(gt)), np.ravel(np.squeeze(x_prediction)))[0, 1]
 
     return accuracy
 
@@ -384,98 +351,67 @@ def train_model():
             k.utils.plot_model(model, to_file="{0}/model.pdf".format(window_output_path), show_shapes=True,
                                show_dtype=True, show_layer_names=True, expand_nested=True)
 
+            x_train_iteration = np.asarray([np.load(x[i], allow_pickle=True)[j]])
+            y_train_iteration = np.asarray([np.load(y[i], allow_pickle=True)[j]])
+
+            if float_sixteen_bool:
+                x_train_iteration = x_train_iteration.astype(np.float16)
+                y_train_iteration = y_train_iteration.astype(np.float16)
+            else:
+                x_train_iteration = x_train_iteration.astype(np.float32)
+                y_train_iteration = y_train_iteration.astype(np.float32)
+
+            if gt is not None:
+                gt_prediction = np.asarray([np.load(gt[i], allow_pickle=True)[j]])
+            else:
+                gt_prediction = None
+
             iteration = 0
             loss_array = []
 
             while True:
                 print("Iteration:\t{0}".format(str(iteration)))
 
-                x_train_iteration = np.asarray([np.load(x[i], allow_pickle=True)[j]])
-                y_train_iteration = np.asarray([np.load(y[i], allow_pickle=True)[j]])
-
-                if float_sixteen_bool:
-                    x_train_iteration = x_train_iteration.astype(np.float16)
-                    y_train_iteration = y_train_iteration.astype(np.float16)
-                else:
-                    x_train_iteration = x_train_iteration.astype(np.float32)
-                    y_train_iteration = y_train_iteration.astype(np.float32)
-
-                loss = model.train_on_batch(x_train_iteration,
-                                            {"output": y_train_iteration},
-                                            reset_metrics=False)
+                loss = model.train_on_batch(x_train_iteration, {"output": y_train_iteration}, reset_metrics=False)
 
                 print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(loss[0]), str(loss[1])))
 
-                if gt is not None or (plot_bool or save_plot_bool):
-                    x_prediction = get_prediction(x, model, i, j)
-                else:
-                    x_prediction = None
+                x_prediction = model.predict_on_batch(x_train_iteration)
 
                 if gt is not None:
-                    gt_accuracy = get_evaluation_score(x_prediction, gt, i, j)
+                    gt_accuracy = get_evaluation_score(x_prediction, gt_prediction)
 
                     print("GT accuracy:\t{0}".format(str(gt_accuracy)))
 
-                if plot_bool or save_plot_bool:
-                    x_prediction = np.squeeze(x_prediction).astype(np.float64)
+                x_prediction = np.squeeze(x_prediction).astype(np.float64)
+                y_plot = np.squeeze(y_train_iteration).astype(np.float64)
 
-                    y_plot = np.squeeze(np.asarray(np.load(y[i], allow_pickle=True)[j]))
+                plt.figure()
 
-                    if gt is not None:
-                        gt_plot = np.squeeze(np.asarray(np.load(gt[i], allow_pickle=True)[j]))
-                    else:
-                        gt_plot = None
+                if gt is not None:
+                    plt.subplot(1, 3, 1)
+                else:
+                    plt.subplot(1, 2, 1)
 
-                    if plot_bool:
-                        plt.figure()
+                plt.imshow(x_prediction[:, :, int(x_prediction.shape[2] / 2)], cmap="Greys")
 
-                        if gt is not None:
-                            plt.subplot(1, 3, 1)
-                        else:
-                            plt.subplot(1, 2, 1)
+                if gt is not None:
+                    plt.subplot(1, 3, 2)
+                else:
+                    plt.subplot(1, 2, 2)
 
-                        plt.imshow(x_prediction[:, :, int(x_prediction.shape[2] / 2)], cmap="Greys")
+                plt.imshow(y_plot[:, :, int(y_plot.shape[2] / 2)], cmap="Greys")
 
-                        if gt is not None:
-                            plt.subplot(1, 3, 2)
-                        else:
-                            plt.subplot(1, 2, 2)
+                if gt_prediction is not None:
+                    gt_plot = np.squeeze(gt_prediction).astype(np.float64)
 
-                        plt.imshow(y_plot[:, :, int(y_plot.shape[2] / 2)], cmap="Greys")
+                    plt.subplot(1, 3, 3)
+                    plt.imshow(gt_plot[:, :, int(gt_plot.shape[2] / 2)], cmap="Greys")
 
-                        if gt_plot is not None:
-                            plt.subplot(1, 3, 3)
-                            plt.imshow(gt_plot[:, :, int(gt_plot.shape[2] / 2)], cmap="Greys")
-
-                        plt.tight_layout()
-                        plt.show()
-                        plt.close()
-
-                    if save_plot_bool:
-                        plt.figure()
-
-                        if gt is not None:
-                            plt.subplot(1, 3, 1)
-                        else:
-                            plt.subplot(1, 2, 1)
-
-                        plt.imshow(x_prediction[:, :, int(x_prediction.shape[2] / 2)], cmap="Greys")
-
-                        if gt is not None:
-                            plt.subplot(1, 3, 2)
-                        else:
-                            plt.subplot(1, 2, 2)
-
-                        plt.imshow(y_plot[:, :, int(y_plot.shape[2] / 2)], cmap="Greys")
-
-                        if gt_plot is not None:
-                            plt.subplot(1, 3, 3)
-                            plt.imshow(gt_plot[:, :, int(gt_plot.shape[2] / 2)], cmap="Greys")
-
-                        plt.tight_layout()
-                        plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)),
-                                    format="png", dpi=600, bbox_inches="tight")
-                        plt.close()
+                plt.tight_layout()
+                plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)),
+                            format="png", dpi=600, bbox_inches="tight")
+                plt.close()
 
                 if parameters.total_variation_bool:
                     if len(loss_array) >= parameters.patience:
@@ -497,9 +433,6 @@ def train_model():
                         break
 
                 iteration = iteration + 1
-
-            if x_prediction is None:
-                x_prediction = get_prediction(x, model, i, j)
 
             current_window_data_paths.append(output_window_predictions(x_prediction, input_volume, window_input_shape,
                                                                        input_preprocessing, window_output_path, i, j))

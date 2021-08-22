@@ -6,14 +6,14 @@
 import tensorflow.keras as k
 
 
-def get_convolution_layer(x, depth, size, stride):
+def get_convolution_layer(x, depth, size, stride, groups):
     print("get_convolution_layer")
 
     x = k.layers.Conv3D(filters=depth,
                         kernel_size=size,
                         strides=stride,
-                        dilation_rate=1,
-                        groups=1,
+                        dilation_rate=(1, 1, 1),
+                        groups=groups,
                         padding="same",
                         kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0))(x)
@@ -23,14 +23,14 @@ def get_convolution_layer(x, depth, size, stride):
     return x
 
 
-def get_transpose_convolution_layer(x, depth, size, stride):
+def get_transpose_convolution_layer(x, depth, size, stride, groups):
     print("get_transpose_convolution_layer")
 
     x = k.layers.Conv3DTranspose(filters=depth,
                                  kernel_size=size,
                                  strides=stride,
-                                 dilation_rate=1,
-                                 groups=1,
+                                 dilation_rate=(1, 1, 1),
+                                 groups=groups,
                                  padding="same",
                                  kernel_initializer="he_normal",
                                  bias_initializer=k.initializers.Constant(0.0))(x)

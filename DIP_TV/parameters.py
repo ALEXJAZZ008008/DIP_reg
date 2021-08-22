@@ -3,18 +3,8 @@
 # For internal research only.
 
 
-noise_input = True
-smooth_input = False
-
 data_window_size = 47
 data_window_bool = True
-
-
-autoencoder_unet_bool = True
-autoencoder_unet_concatenate_bool = False
-
-down_stride_bool = True
-up_stride_bool = False
 
 
 total_variation_bool = True

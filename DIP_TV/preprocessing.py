@@ -92,7 +92,7 @@ def data_preprocessing(data, data_type, scalers=None):
         data_copy = data_copy.reshape(-1, 1)
 
         if len(scalers) < len(data):
-            scaler = StandardScaler(copy=False)
+            scaler = StandardScaler()
             scaler.fit(data_copy)
 
             scalers.append(scaler)
