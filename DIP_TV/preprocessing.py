@@ -10,6 +10,8 @@ import scipy.ndimage
 from sklearn.preprocessing import StandardScaler
 from tqdm import trange
 
+import parameters
+
 rng = np.random.default_rng()
 
 
@@ -48,12 +50,18 @@ def data_upsample(data, data_type, new_resolution=None):
             dimension_y_upscale_factor = new_resolution[1] / data_copy.shape[2]
             dimension_z_upscale_factor = new_resolution[2] / data_copy.shape[3]
         else:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in trange(len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
             dimension_x_upscale_factor = \
-                get_next_geometric_value(data_copy.shape[1], geometric_sequence_a0) / data_copy.shape[1]
+                get_next_geometric_value(data_copy_shape[1], geometric_sequence_a0) / data_copy.shape[1]
             dimension_y_upscale_factor = \
-                get_next_geometric_value(data_copy.shape[2], geometric_sequence_a0) / data_copy.shape[2]
+                get_next_geometric_value(data_copy_shape[2], geometric_sequence_a0) / data_copy.shape[2]
             dimension_z_upscale_factor = \
-                get_next_geometric_value(data_copy.shape[3], geometric_sequence_a0) / data_copy.shape[3]
+                get_next_geometric_value(data_copy_shape[3], geometric_sequence_a0) / data_copy.shape[3]
 
         if not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
                 not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \

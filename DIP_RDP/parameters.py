@@ -3,18 +3,13 @@
 # For internal research only.
 
 
-noise_input = True
-smooth_input = True
-
 data_window_size = 47
 data_window_bool = False
 
-
-down_stride_bool = True
-up_stride_bool = False
+gaussian_sigma = 0.1
 
 
-total_variation_bool = True
+relative_difference_bool = True
 vanilla_max_iteration = 300
 patience = 10
 plateau_cutoff = 1e-04

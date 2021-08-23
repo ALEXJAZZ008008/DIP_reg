@@ -8,6 +8,7 @@ import re
 import shutil
 import random
 import numpy as np
+import numpy.random
 import scipy.constants
 import scipy.stats
 import scipy.ndimage
@@ -118,11 +119,15 @@ def get_train_data():
     x = []
     y = []
 
-    if not os.path.exists("{0}/x_train".format(output_path)):
-        os.makedirs("{0}/x_train".format(output_path), mode=0o770)
+    x_train_output_path = "{0}/x_train".format(output_path)
 
-    if not os.path.exists("{0}/y_train".format(output_path)):
-        os.makedirs("{0}/y_train".format(output_path), mode=0o770)
+    if not os.path.exists(x_train_output_path):
+        os.makedirs(x_train_output_path, mode=0o770)
+
+    y_train_output_path = "{0}/y_train".format(output_path)
+
+    if not os.path.exists(y_train_output_path):
+        os.makedirs(y_train_output_path, mode=0o770)
 
     current_volume = None
     full_current_shape = None
@@ -142,28 +147,28 @@ def get_train_data():
         if current_shape is None:
             current_shape = current_array[0].shape
 
-        np.save("{0}/y_train/{1}.npy".format(output_path, str(i)), current_array)
-        y.append("{0}/y_train/{1}.npy".format(output_path, str(i)))
+        current_y_train_path = "{0}/{1}.npy".format(y_train_output_path, str(i))
+        np.save(current_y_train_path, current_array)
+        y.append(current_y_train_path)
 
-        if parameters.smooth_input:
-            current_array = current_array - np.mean(current_array)
-            current_array = current_array / np.std(current_array)
+        if gaussian_noise is None:
+            gaussian_noise = preprocessing.redistribute(numpy.random.normal(size=current_array.shape))
 
-        if parameters.noise_input:
-            if gaussian_noise is None:
-                gaussian_noise = np.random.normal(size=current_array.shape)
+        for j in trange(current_array.shape[2]):
+            current_array[:, :, j] = scipy.ndimage.gaussian_filter(current_array[:, :, j], sigma=2.5, mode="mirror")
 
-            if parameters.smooth_input:
-                current_array = (gaussian_noise +
-                                 scipy.ndimage.gaussian_filter(current_array, sigma=5.0, mode="mirror")) / 2.0
-            else:
-                current_array = gaussian_noise
-        else:
-            if parameters.smooth_input:
-                current_array = scipy.ndimage.gaussian_filter(current_array, sigma=5.0, mode="mirror")
+        for j in trange(current_array.shape[0]):
+            for l in trange(current_array.shape[1]):
+                current_array[j, l, :] = scipy.ndimage.gaussian_filter(current_array[j, l, :], sigma=0.5, mode="mirror")
 
-        np.save("{0}/x_train/{1}.npy".format(output_path, str(i)), current_array)
-        x.append("{0}/x_train/{1}.npy".format(output_path, str(i)))
+        current_array = preprocessing.redistribute(current_array)
+
+        gaussian_weight = parameters.gaussian_sigma
+        current_array = (current_array + (gaussian_weight * gaussian_noise)) / (1.0 + gaussian_weight)
+
+        current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
+        np.save(current_x_train_path, current_array)
+        x.append(current_x_train_path)
 
     y = np.asarray(y)
 
@@ -176,16 +181,19 @@ def get_train_data():
 
         gt = []
 
-        if not os.path.exists("{0}/gt_train".format(output_path)):
-            os.makedirs("{0}/gt_train".format(output_path), mode=0o770)
+        gt_train_output_path = "{0}/gt_train".format(output_path)
+
+        if not os.path.exists(gt_train_output_path):
+            os.makedirs(gt_train_output_path, mode=0o770)
 
         for i in trange(len(gt_files)):
             current_array = nib.load(gt_files[i]).get_data()
 
             current_array, _ = get_data_windows(current_array)
 
-            np.save("{0}/gt_train/{1}.npy".format(output_path, str(i)), current_array)
-            gt.append("{0}/gt_train/{1}.npy".format(output_path, str(i)))
+            current_gt_train_path = "{0}/{1}.npy".format(gt_train_output_path, str(i))
+            np.save(current_gt_train_path, current_array)
+            gt.append(current_gt_train_path)
 
         gt = np.asarray(gt)
     else:
@@ -273,10 +281,7 @@ def output_window_predictions(x_prediction, y, input_volume, window_input_shape,
     x_prediction = x_prediction.astype(np.float64)
     y = y.astype(np.float64)
 
-    x_prediction = x_prediction - np.mean(x_prediction)
-    x_prediction = x_prediction / np.std(x_prediction)
-    x_prediction = x_prediction * np.std(y)
-    x_prediction = x_prediction + np.mean(y)
+    x_prediction = preprocessing.redistribute(x_prediction, y)
 
     x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", [input_preprocessing])[0]
     x_prediction = np.squeeze(preprocessing.data_upsample([x_prediction], "numpy", window_input_shape)[0])
@@ -437,7 +442,7 @@ def train_model():
                             format="png", dpi=600, bbox_inches="tight")
                 plt.close()
 
-                if parameters.total_variation_bool:
+                if parameters.relative_difference_bool:
                     if len(loss_array) >= parameters.patience:
                         loss_array.pop(0)
 

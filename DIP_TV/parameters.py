@@ -3,8 +3,8 @@
 # For internal research only.
 
 
-data_window_size = 47
-data_window_bool = True
+data_window_size = 64
+data_window_bool = False
 
 
 total_variation_bool = True

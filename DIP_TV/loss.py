@@ -39,8 +39,7 @@ def total_variation(images):
     return tot_var
 
 
-def total_variation_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
+def total_variation_loss(_, y_pred):
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
     return tf.reduce_sum(total_variation(y_pred))

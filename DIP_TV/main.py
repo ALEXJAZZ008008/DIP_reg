@@ -8,9 +8,6 @@ import re
 import shutil
 import random
 import numpy as np
-import scipy.constants
-import scipy.stats
-import scipy.ndimage
 import tensorflow as tf
 import tensorflow.keras as k
 import matplotlib.pyplot as plt
@@ -118,11 +115,15 @@ def get_train_data():
     x = []
     y = []
 
-    if not os.path.exists("{0}/x_train".format(output_path)):
-        os.makedirs("{0}/x_train".format(output_path), mode=0o770)
+    x_train_output_path = "{0}/x_train".format(output_path)
 
-    if not os.path.exists("{0}/y_train".format(output_path)):
-        os.makedirs("{0}/y_train".format(output_path), mode=0o770)
+    if not os.path.exists(x_train_output_path):
+        os.makedirs(x_train_output_path, mode=0o770)
+
+    y_train_output_path = "{0}/y_train".format(output_path)
+
+    if not os.path.exists(y_train_output_path):
+        os.makedirs(y_train_output_path, mode=0o770)
 
     current_volume = None
     full_current_shape = None
@@ -141,13 +142,15 @@ def get_train_data():
         if current_shape is None:
             current_shape = current_array[0].shape
 
-        np.save("{0}/y_train/{1}.npy".format(output_path, str(i)), current_array)
-        y.append("{0}/y_train/{1}.npy".format(output_path, str(i)))
+        current_y_train_path = "{0}/{1}.npy".format(y_train_output_path, str(i))
+        np.save(current_y_train_path, current_array)
+        y.append(current_y_train_path)
 
         current_array = np.random.normal(size=current_array.shape)
 
-        np.save("{0}/x_train/{1}.npy".format(output_path, str(i)), current_array)
-        x.append("{0}/x_train/{1}.npy".format(output_path, str(i)))
+        current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
+        np.save(current_x_train_path, current_array)
+        x.append(current_x_train_path)
 
     y = np.asarray(y)
 
@@ -160,16 +163,19 @@ def get_train_data():
 
         gt = []
 
-        if not os.path.exists("{0}/gt_train".format(output_path)):
-            os.makedirs("{0}/gt_train".format(output_path), mode=0o770)
+        gt_train_output_path = "{0}/gt_train".format(output_path)
+
+        if not os.path.exists(gt_train_output_path):
+            os.makedirs(gt_train_output_path, mode=0o770)
 
         for i in trange(len(gt_files)):
             current_array = nib.load(gt_files[i]).get_data()
 
             current_array, _ = get_data_windows(current_array)
 
-            np.save("{0}/gt_train/{1}.npy".format(output_path, str(i)), current_array)
-            gt.append("{0}/gt_train/{1}.npy".format(output_path, str(i)))
+            current_gt_train_path = "{0}/{1}.npy".format(gt_train_output_path, str(i))
+            np.save(current_gt_train_path, current_array)
+            gt.append(current_gt_train_path)
 
         gt = np.asarray(gt)
     else:

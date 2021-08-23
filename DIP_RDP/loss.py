@@ -3,77 +3,146 @@
 # For internal research only.
 
 
+import math
 import tensorflow as tf
 import tensorflow.keras as k
 
 
-# https://github.com/keras-team/keras/blob/master/keras/losses.py#L256-L310
-def mean_squared_error_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
-
-    return k.backend.mean(tf.math.squared_difference(y_pred, y_true), axis=-1)
-
-
 # https://github.com/keras-team/keras/blob/master/keras/losses.py#L1580-L1617
-def log_cosh(y_true, y_pred):
+def log_cosh_loss(y_true, y_pred):
+    def _log_cosh(x):
+        return (x + tf.math.softplus(-2.0 * x)) - tf.cast(tf.math.log(2.0), x.dtype)
+
     y_true = tf.cast(y_true, dtype=tf.float64)
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
-    def _logcosh(x):
-        return x + tf.math.softplus(-2. * x) - tf.cast(
-            tf.math.log(2.), x.dtype)
-
-    return k.backend.mean(_logcosh(y_pred - y_true), axis=-1)
+    return k.backend.mean(_log_cosh(y_pred - y_true), axis=-1)
 
 
-# https://github.com/keras-team/keras/blob/master/keras/losses.py#L1850-L1888
-def kullback_leibler_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
+def total_variation_loss(_, y_pred):
+    def _pixel_dif_negative(x, n1, n2, n3):
+        return tf.math.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
+                                   tf.math.pow(x[:, :-n1 or None, :-n2 or None, :-n3 or None, :] -
+                                               x[:, n1 or None:, n2 or None:, n3 or None:, :], 2.0))
+
+    def _pixel_dif_positive(x, n1, n2, n3):
+        return tf.math.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
+                                   tf.math.pow(x[:, n1 or None:, n2 or None:, n3 or None:, :] -
+                                               x[:, :-n1 or None, :-n2 or None, :-n3 or None, :], 2.0))
+
+    def _total_variation_loss(x, n, _pixel_dif):
+        _pixel_dif.append(_pixel_dif_negative(x, n, 0, 0))
+        _pixel_dif.append(_pixel_dif_negative(x, 0, n, 0))
+        _pixel_dif.append(_pixel_dif_negative(x, 0, 0, n))
+
+        _pixel_dif.append(_pixel_dif_negative(x, n, n, 0))
+        _pixel_dif.append(_pixel_dif_negative(x, n, 0, n))
+        _pixel_dif.append(_pixel_dif_negative(x, 0, n, n))
+
+        _pixel_dif.append(_pixel_dif_negative(x, n, n, n))
+
+        _pixel_dif.append(_pixel_dif_positive(x, n, 0, 0))
+        _pixel_dif.append(_pixel_dif_positive(x, 0, n, 0))
+        _pixel_dif.append(_pixel_dif_positive(x, 0, 0, n))
+
+        _pixel_dif.append(_pixel_dif_positive(x, n, n, 0))
+        _pixel_dif.append(_pixel_dif_positive(x, n, 0, n))
+        _pixel_dif.append(_pixel_dif_positive(x, 0, n, n))
+
+        _pixel_dif.append(_pixel_dif_positive(x, n, n, n))
+
+        return _pixel_dif
+
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
-    y_true = k.backend.clip(y_true, k.backend.epsilon(), 1)
-    y_pred = k.backend.clip(y_pred, k.backend.epsilon(), 1)
-
-    return tf.reduce_sum(y_true * tf.math.log(y_true / y_pred), axis=-1)
-
-
-# https://github.com/tensorflow/tensorflow/blob/v2.6.0/tensorflow/python/ops/image_ops_impl.py#L3213-L3282
-def total_variation(images):
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
 
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
+
+    pixel_dif = []
+
     # Calculate the difference of neighboring pixel-values.
     # The images are shifted one pixel along the height, width and depth by slicing.
-    pixel_dif1 = images[:, 1:, :, :, :] - images[:, :-1, :, :, :]
-    pixel_dif2 = images[:, :, 1:, :, :] - images[:, :, :-1, :, :]
-    pixel_dif3 = images[:, :, :, 1:, :] - images[:, :, :, :-1, :]
-
-    # Only sum for the last 4 axis.
-    # This results in a 1-D tensor with the total variation for each image.
-    sum_axis = [1, 2, 3, 4]
-
     # Calculate the total variation by taking the absolute value of the
-    # pixel-differences and summing over the appropriate axis.
-    tot_var = (tf.math.reduce_sum(tf.math.abs(pixel_dif1), axis=sum_axis) +
-               tf.math.reduce_sum(tf.math.abs(pixel_dif2), axis=sum_axis) +
-               tf.math.reduce_sum(tf.math.abs(pixel_dif3), axis=sum_axis))
+    # pixel-differences summing over the appropriate axis.
+    pixel_dif = _total_variation_loss(y_pred, 1, pixel_dif)
 
-    return tot_var
+    return tf.reduce_mean(tf.convert_to_tensor(pixel_dif))
 
 
-def total_variation_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
+def log_cosh_total_variation_loss(y_true, y_pred):
+    return ((1.0 * log_cosh_loss(y_true, y_pred)) + (1e-01 * total_variation_loss(y_true, y_pred))) / 2.0
+
+
+def relative_difference_loss(_, y_pred):
+    def _pixel_dif_negative(x, n1, n2, n3, _gamma):
+        current_pixel_dif = x[:, :-n1 or None, :-n2 or None, :-n3 or None, :] - \
+                            x[:, n1 or None:, n2 or None:, n3 or None:, :]
+
+        return tf.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
+                              (tf.math.pow(current_pixel_dif, 2.0) /
+                               ((x[:, :-n1 or None, :-n2 or None, :-n3 or None, :] +
+                                 x[:, n1 or None:, n2 or None:, n3 or None:, :]) +
+                                (_gamma * tf.math.abs(current_pixel_dif)))))
+
+    def _pixel_dif_positive(x, n1, n2, n3, _gamma):
+        current_pixel_dif = x[:, n1 or None:, n2 or None:, n3 or None:, :] - \
+                            x[:, :-n1 or None, :-n2 or None, :-n3 or None, :]
+
+        return tf.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
+                              (tf.math.pow(current_pixel_dif, 2.0) /
+                               ((x[:, n1 or None:, n2 or None:, n3 or None:, :] +
+                                 x[:, :-n1 or None, :-n2 or None, :-n3 or None, :]) +
+                                (_gamma * tf.math.abs(current_pixel_dif)))))
+
+    def _relative_difference_loss(x, n, _gamma, _pixel_dif):
+        _pixel_dif.append(_pixel_dif_negative(x, n, 0, 0, _gamma))
+        _pixel_dif.append(_pixel_dif_negative(x, 0, n, 0, _gamma))
+        _pixel_dif.append(_pixel_dif_negative(x, 0, 0, n, _gamma))
+
+        _pixel_dif.append(_pixel_dif_negative(x, n, n, 0, _gamma))
+        _pixel_dif.append(_pixel_dif_negative(x, n, 0, n, _gamma))
+        _pixel_dif.append(_pixel_dif_negative(x, 0, n, n, _gamma))
+
+        _pixel_dif.append(_pixel_dif_negative(x, n, n, n, _gamma))
+
+        _pixel_dif.append(_pixel_dif_positive(x, n, 0, 0, _gamma))
+        _pixel_dif.append(_pixel_dif_positive(x, 0, n, 0, _gamma))
+        _pixel_dif.append(_pixel_dif_positive(x, 0, 0, n, _gamma))
+
+        _pixel_dif.append(_pixel_dif_positive(x, n, n, 0, _gamma))
+        _pixel_dif.append(_pixel_dif_positive(x, n, 0, n, _gamma))
+        _pixel_dif.append(_pixel_dif_positive(x, 0, n, n, _gamma))
+
+        _pixel_dif.append(_pixel_dif_positive(x, n, n, n, _gamma))
+
+        return _pixel_dif
+
     y_pred = tf.cast(y_pred, dtype=tf.float64)
 
-    return tf.reduce_sum(total_variation(y_pred))
+    # The input is a batch of images with shape:
+    # [batch, height, width, depth, channels].
+
+    y_pred = y_pred - tf.math.reduce_min(y_pred)
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
+
+    gamma = 0.0
+
+    pixel_dif = []
+
+    # Calculate the difference of neighboring pixel-values.
+    # The images are shifted one pixel along the height, width and depth by slicing.
+    # Calculate the total variation by taking the absolute value of the
+    # pixel-differences
+    pixel_dif = _relative_difference_loss(y_pred, 1, gamma, pixel_dif)
+
+    # summing over the appropriate axis.
+    return tf.reduce_mean(tf.convert_to_tensor(pixel_dif))
 
 
-def mean_square_error_total_variation_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
-
-    return ((1.0 * mean_squared_error_loss(y_true, y_pred)) + (9e-08 * total_variation_loss(y_true, y_pred))) / 2.0
+def log_cosh_relative_difference_loss(y_true, y_pred):
+    return ((1.0 * log_cosh_loss(y_true, y_pred)) + (1e-01 * relative_difference_loss(y_true, y_pred))) / 2.0
 
 
 # https://stackoverflow.com/questions/46619869/how-to-specify-the-correlation-coefficient-as-the-loss-function-in-keras
@@ -97,7 +166,4 @@ def correlation_coefficient_loss(y_true, y_pred):
 
 
 def accuracy_correlation_coefficient(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
-
     return (correlation_coefficient_loss(y_true, y_pred) * -1.0) + 1.0

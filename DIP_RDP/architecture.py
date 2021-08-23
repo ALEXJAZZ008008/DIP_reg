@@ -30,6 +30,8 @@ def get_encoder(x, kernel_weight, activity_sparseness):
 
     unet_connections = []
 
+    x = k.layers.GaussianNoise(parameters.gaussian_sigma)(x)
+
     x = layers.get_convolution_layer(x, layer_depth[0], layer_kernel_size[0], (1, 1, 1), 1, kernel_weight,
                                      activity_sparseness)
 
@@ -50,7 +52,7 @@ def get_encoder(x, kernel_weight, activity_sparseness):
 def get_latent(x, kernel_weight, activity_sparseness):
     print("get_latent")
 
-    layer_layers = [1]
+    layer_layers = [2]
     layer_depth = [64]
     layer_kernel_size = [(3, 3, 3)]
     layer_groups = [32]
@@ -127,13 +129,13 @@ def get_model(input_shape):
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
-    if parameters.total_variation_bool:
+    if parameters.relative_difference_bool:
         model.compile(optimizer=k.optimizers.Nadam(clipvalue=6.0),
-                      loss={"output": loss.mean_square_error_total_variation_loss}, loss_weights=[1.0],
+                      loss={"output": loss.log_cosh_relative_difference_loss}, loss_weights=[1.0],
                       metrics=[loss.accuracy_correlation_coefficient])
     else:
         model.compile(optimizer=k.optimizers.Nadam(clipvalue=6.0),
-                      loss={"output": loss.log_cosh}, loss_weights=[1.0],
+                      loss={"output": loss.log_cosh_loss}, loss_weights=[1.0],
                       metrics=[loss.accuracy_correlation_coefficient])
 
     return model

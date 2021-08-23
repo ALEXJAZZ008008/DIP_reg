@@ -33,7 +33,7 @@ class ReflectionPadding3D(k.layers.Layer):
                                      [self.padding[0], self.padding[0]],
                                      [self.padding[1], self.padding[1]],
                                      [self.padding[2], self.padding[2]],
-                                     [0, 0]], 'REFLECT')
+                                     [0, 0]], "REFLECT")
 
 
 def get_reflection_padding(x, size):
