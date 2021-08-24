@@ -263,13 +263,13 @@ def get_model_memory_usage(batch_size, model):
     return gbytes
 
 
-def get_evaluation_score(x_prediction, gt):
+def get_evaluation_score(prediction, gt):
     print("get_evaluation_score")
 
     if float_sixteen_bool:
-        x_prediction = x_prediction.astype(np.float32)
+        prediction = prediction.astype(np.float32)
 
-    accuracy = np.corrcoef(np.ravel(np.squeeze(gt)), np.ravel(np.squeeze(x_prediction)))[0, 1]
+    accuracy = np.corrcoef(np.ravel(np.squeeze(gt)), np.ravel(np.squeeze(prediction)))[0, 1]
 
     return accuracy
 
@@ -397,11 +397,36 @@ def train_model():
 
             iteration = 0
             loss_array = []
+            relative_plateau_cutoff = None
 
             while True:
                 print("Iteration:\t{0}".format(str(iteration)))
 
-                loss = model.train_on_batch(x_train_iteration, {"output": y_train_iteration}, reset_metrics=False)
+                current_loss_increase_patience = 0
+
+                while True:
+                    previous_model_weights = model.get_weights()
+
+                    loss = model.train_on_batch(x_train_iteration, {"output": y_train_iteration}, reset_metrics=False)
+
+                    loss_array_length = len(loss_array)
+
+                    if loss_array_length > 0:
+                        if loss[0] < loss_array[-1]:
+                            break
+                        else:
+                            if current_loss_increase_patience >= parameters.patience:
+                                print("Loss increased; allowing anyway...")
+
+                                break
+                            else:
+                                print("Loss increased; trying again...")
+
+                                model.set_weights(previous_model_weights)
+
+                                current_loss_increase_patience = current_loss_increase_patience + 1
+                    else:
+                        break
 
                 print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(loss[0]), str(loss[1])))
 
@@ -443,15 +468,18 @@ def train_model():
                 plt.close()
 
                 if parameters.relative_difference_bool:
-                    if len(loss_array) >= parameters.patience:
+                    if loss_array_length >= parameters.patience:
                         loss_array.pop(0)
 
                     loss_array.append(loss[0])
 
-                    if len(loss_array) >= parameters.patience:
+                    if relative_plateau_cutoff is None:
+                        relative_plateau_cutoff = parameters.plateau_cutoff * loss_array[0]
+
+                    if loss_array_length + 1 >= parameters.patience:
                         loss_gradient = np.gradient(loss_array)
 
-                        if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=parameters.plateau_cutoff):
+                        if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
                             print("Reached plateau: Exiting...")
 
                             break

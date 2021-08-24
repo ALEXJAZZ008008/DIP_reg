@@ -3,167 +3,501 @@
 # For internal research only.
 
 
-import math
 import tensorflow as tf
-import tensorflow.keras as k
 
 
-# https://github.com/keras-team/keras/blob/master/keras/losses.py#L1580-L1617
 def log_cosh_loss(y_true, y_pred):
     def _log_cosh(x):
-        return (x + tf.math.softplus(-2.0 * x)) - tf.cast(tf.math.log(2.0), x.dtype)
+        return (x + tf.math.softplus(-2.0 * x)) - tf.math.log(2.0)
 
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-    return k.backend.mean(_log_cosh(y_pred - y_true), axis=-1)
+    return tf.math.reduce_mean(_log_cosh(y_pred - y_true))
 
 
 def total_variation_loss(_, y_pred):
-    def _pixel_dif_negative(x, n1, n2, n3):
-        return tf.math.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
-                                   tf.math.pow(x[:, :-n1 or None, :-n2 or None, :-n3 or None, :] -
-                                               x[:, n1 or None:, n2 or None:, n3 or None:, :], 2.0))
+    def _pixel_dif_one_distance(n):
+        return 1.0 / tf.cast(n, dtype=tf.float32)
 
-    def _pixel_dif_positive(x, n1, n2, n3):
-        return tf.math.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
-                                   tf.math.pow(x[:, n1 or None:, n2 or None:, n3 or None:, :] -
-                                               x[:, :-n1 or None, :-n2 or None, :-n3 or None, :], 2.0))
+    def _pixel_dif_one_1(x, n):
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, n:, :, :, :] - x[:, :-n, :, :, :]))
 
-    def _total_variation_loss(x, n, _pixel_dif):
-        _pixel_dif.append(_pixel_dif_negative(x, n, 0, 0))
-        _pixel_dif.append(_pixel_dif_negative(x, 0, n, 0))
-        _pixel_dif.append(_pixel_dif_negative(x, 0, 0, n))
+    def _pixel_dif_one_2(x, n):
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :-n, :, :, :] - x[:, n:, :, :, :]))
 
-        _pixel_dif.append(_pixel_dif_negative(x, n, n, 0))
-        _pixel_dif.append(_pixel_dif_negative(x, n, 0, n))
-        _pixel_dif.append(_pixel_dif_negative(x, 0, n, n))
+    def _pixel_dif_one_3(x, n):
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, n:, :, :] - x[:, :, :-n, :, :]))
 
-        _pixel_dif.append(_pixel_dif_negative(x, n, n, n))
+    def _pixel_dif_one_4(x, n):
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, :-n, :, :] - x[:, :, n:, :, :]))
 
-        _pixel_dif.append(_pixel_dif_positive(x, n, 0, 0))
-        _pixel_dif.append(_pixel_dif_positive(x, 0, n, 0))
-        _pixel_dif.append(_pixel_dif_positive(x, 0, 0, n))
+    def _pixel_dif_one_5(x, n):
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, :, n:, :] - x[:, :, :, :-n, :]))
 
-        _pixel_dif.append(_pixel_dif_positive(x, n, n, 0))
-        _pixel_dif.append(_pixel_dif_positive(x, n, 0, n))
-        _pixel_dif.append(_pixel_dif_positive(x, 0, n, n))
+    def _pixel_dif_one_6(x, n):
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, :, :-n, :] - x[:, :, :, :n, :]))
 
-        _pixel_dif.append(_pixel_dif_positive(x, n, n, n))
+    def _pixel_dif_one(x, n):
+        return tf.math.reduce_sum(tf.stack([_pixel_dif_one_1(x, n),
+                                            _pixel_dif_one_2(x, n),
+                                            _pixel_dif_one_3(x, n),
+                                            _pixel_dif_one_4(x, n),
+                                            _pixel_dif_one_5(x, n),
+                                            _pixel_dif_one_6(x, n)]))
 
-        return _pixel_dif
+    def _pixel_dif_two_distance(n1, n2):
+        return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n2, dtype=tf.float32)))
 
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    def _pixel_dif_two_1(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, n2:, :, :] - x[:, :-n1, :-n2, :, :]))
+
+    def _pixel_dif_two_2(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, n2:, :, :] - x[:, n1:, :-n2, :, :]))
+
+    def _pixel_dif_two_3(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, :-n2, :, :] - x[:, :-n1, n2:, :, :]))
+
+    def _pixel_dif_two_4(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, :-n2, :, :] - x[:, n1:, n2:, :, :]))
+
+    def _pixel_dif_two_5(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, :, n2:, :] - x[:, :-n1, :, :-n2, :]))
+
+    def _pixel_dif_two_6(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, :, n2:, :] - x[:, n1:, :, :-n2, :]))
+
+    def _pixel_dif_two_7(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, :, :-n2, :] - x[:, :-n1, :, n2:, :]))
+
+    def _pixel_dif_two_8(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, :, :-n2, :] - x[:, n1:, :, n2:, :]))
+
+    def _pixel_dif_two_9(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :, n1:, n2:, :] - x[:, :, :-n1, :-n2, :]))
+
+    def _pixel_dif_two_10(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) - \
+               tf.math.reduce_mean(tf.math.square(x[:, :, :-n1, n2:, :] - x[:, :, n1:, :-n2, :]))
+
+    def _pixel_dif_two_11(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :, n1:, :-n2, :] - x[:, :, :-n1, n2:, :]))
+
+    def _pixel_dif_two_12(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :, :-n1, :-n2, :] - x[:, :, n1:, n2:, :]))
+
+    def _pixel_dif_two(x, n1, n2):
+        return tf.math.reduce_sum(tf.stack([_pixel_dif_two_1(x, n1, n2),
+                                            _pixel_dif_two_2(x, n1, n2),
+                                            _pixel_dif_two_3(x, n1, n2),
+                                            _pixel_dif_two_4(x, n1, n2),
+                                            _pixel_dif_two_5(x, n1, n2),
+                                            _pixel_dif_two_6(x, n1, n2),
+                                            _pixel_dif_two_7(x, n1, n2),
+                                            _pixel_dif_two_8(x, n1, n2),
+                                            _pixel_dif_two_9(x, n1, n2),
+                                            _pixel_dif_two_10(x, n1, n2),
+                                            _pixel_dif_two_11(x, n1, n2),
+                                            _pixel_dif_two_12(x, n1, n2)]))
+
+    def _pixel_dif_three_distance(n1, n2, n3):
+        return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n2, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n3, dtype=tf.float32)))
+
+    def _pixel_dif_three_1(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, n2:, n3:, :] - x[:, :-n1, :-n2, :-n3, :]))
+
+    def _pixel_dif_three_2(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, n2:, n3:, :] - x[:, n1:, :-n2, :-n3, :]))
+
+    def _pixel_dif_three_3(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, :-n2, n3:, :] - x[:, :-n1, n2:, :-n3, :]))
+
+    def _pixel_dif_three_4(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, n2:, :-n3, :] - x[:, :-n1, :-n2, -n3:, :]))
+
+    def _pixel_dif_three_5(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, :-n2, n3:, :] - x[:, n1:, n2:, :-n3, :]))
+
+    def _pixel_dif_three_6(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, n2:, :-n3, :] - x[:, n1:, :-n2, n3:, :]))
+
+    def _pixel_dif_three_7(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, :-n2, :-n3, :] - x[:, :-n1, n2:, n3:, :]))
+
+    def _pixel_dif_three_8(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * \
+               tf.math.reduce_mean(tf.math.square(x[:, :-n1, :-n2, :-n3, :] - x[:, n1:, n2:, n3:, :]))
+
+    def _pixel_dif_three(x, n1, n2, n3):
+        return tf.math.reduce_sum(tf.stack([_pixel_dif_three_1(x, n1, n2, n3),
+                                            _pixel_dif_three_2(x, n1, n2, n3),
+                                            _pixel_dif_three_3(x, n1, n2, n3),
+                                            _pixel_dif_three_4(x, n1, n2, n3),
+                                            _pixel_dif_three_5(x, n1, n2, n3),
+                                            _pixel_dif_three_6(x, n1, n2, n3),
+                                            _pixel_dif_three_7(x, n1, n2, n3),
+                                            _pixel_dif_three_8(x, n1, n2, n3)]))
+
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
+    y_pred = tf.math.subtract(y_pred, tf.math.reduce_min(y_pred))
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
 
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
-
-    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
-
-    pixel_dif = []
 
     # Calculate the difference of neighboring pixel-values.
     # The images are shifted one pixel along the height, width and depth by slicing.
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences summing over the appropriate axis.
-    pixel_dif = _total_variation_loss(y_pred, 1, pixel_dif)
+    pixel_dif = tf.reduce_sum(_pixel_dif_one(y_pred, 1))
+    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_two(y_pred, 1, 1))
+    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_three(y_pred, 1, 1, 1))
 
-    return tf.reduce_mean(tf.convert_to_tensor(pixel_dif))
+    return pixel_dif / 26.0
 
 
 def log_cosh_total_variation_loss(y_true, y_pred):
-    return ((1.0 * log_cosh_loss(y_true, y_pred)) + (1e-01 * total_variation_loss(y_true, y_pred))) / 2.0
+    return (log_cosh_loss(y_true, y_pred) + (1e-02 * total_variation_loss(y_true, y_pred))) / 2.0
 
 
 def relative_difference_loss(_, y_pred):
-    def _pixel_dif_negative(x, n1, n2, n3, _gamma):
-        current_pixel_dif = x[:, :-n1 or None, :-n2 or None, :-n3 or None, :] - \
-                            x[:, n1 or None:, n2 or None:, n3 or None:, :]
+    def _pixel_dif_one_distance(n):
+        return 1.0 / tf.cast(n, dtype=tf.float32)
 
-        return tf.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
-                              (tf.math.pow(current_pixel_dif, 2.0) /
-                               ((x[:, :-n1 or None, :-n2 or None, :-n3 or None, :] +
-                                 x[:, n1 or None:, n2 or None:, n3 or None:, :]) +
-                                (_gamma * tf.math.abs(current_pixel_dif)))))
+    def _pixel_dif_one_1(x, n, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n, __gamma):
+            return _pixel_dif_one_distance(n) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n:, :, :, :] + _x[:, :-_n, :, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
 
-    def _pixel_dif_positive(x, n1, n2, n3, _gamma):
-        current_pixel_dif = x[:, n1 or None:, n2 or None:, n3 or None:, :] - \
-                            x[:, :-n1 or None, :-n2 or None, :-n3 or None, :]
+        return _pixel_dif(x, x[:, n:, :, :, :] - x[:, :-n, :, :, :], n, _gamma)
 
-        return tf.reduce_mean((1.0 / math.sqrt(math.pow(n1, 2.0) * math.pow(n2, 2.0) * math.pow(n3, 2.0))) *
-                              (tf.math.pow(current_pixel_dif, 2.0) /
-                               ((x[:, n1 or None:, n2 or None:, n3 or None:, :] +
-                                 x[:, :-n1 or None, :-n2 or None, :-n3 or None, :]) +
-                                (_gamma * tf.math.abs(current_pixel_dif)))))
+    def _pixel_dif_one_2(x, n, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n, __gamma):
+            return _pixel_dif_one_distance(n) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n, :, :, :] + _x[:, _n:, :, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
 
-    def _relative_difference_loss(x, n, _gamma, _pixel_dif):
-        _pixel_dif.append(_pixel_dif_negative(x, n, 0, 0, _gamma))
-        _pixel_dif.append(_pixel_dif_negative(x, 0, n, 0, _gamma))
-        _pixel_dif.append(_pixel_dif_negative(x, 0, 0, n, _gamma))
+        return _pixel_dif(x, x[:, :-n, :, :, :] - x[:, n:, :, :, :], n, _gamma)
 
-        _pixel_dif.append(_pixel_dif_negative(x, n, n, 0, _gamma))
-        _pixel_dif.append(_pixel_dif_negative(x, n, 0, n, _gamma))
-        _pixel_dif.append(_pixel_dif_negative(x, 0, n, n, _gamma))
+    def _pixel_dif_one_3(x, n, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n, __gamma):
+            return _pixel_dif_one_distance(n) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, _n:, :, :] + _x[:, :, :-_n, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
 
-        _pixel_dif.append(_pixel_dif_negative(x, n, n, n, _gamma))
+        return _pixel_dif(x, x[:, :, n:, :, :] - x[:, :, :-n, :, :], n, _gamma)
 
-        _pixel_dif.append(_pixel_dif_positive(x, n, 0, 0, _gamma))
-        _pixel_dif.append(_pixel_dif_positive(x, 0, n, 0, _gamma))
-        _pixel_dif.append(_pixel_dif_positive(x, 0, 0, n, _gamma))
+    def _pixel_dif_one_4(x, n, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n, __gamma):
+            return _pixel_dif_one_distance(n) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, :-_n, :, :] + _x[:, :, _n:, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
 
-        _pixel_dif.append(_pixel_dif_positive(x, n, n, 0, _gamma))
-        _pixel_dif.append(_pixel_dif_positive(x, n, 0, n, _gamma))
-        _pixel_dif.append(_pixel_dif_positive(x, 0, n, n, _gamma))
+        return _pixel_dif(x, x[:, :, :-n, :, :] - x[:, :, n:, :, :], n, _gamma)
 
-        _pixel_dif.append(_pixel_dif_positive(x, n, n, n, _gamma))
+    def _pixel_dif_one_5(x, n, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n, __gamma):
+            return _pixel_dif_one_distance(n) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, :, _n:, :] + _x[:, :, :, :-_n, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
 
-        return _pixel_dif
+        return _pixel_dif(x, x[:, :, :, n:, :] - x[:, :, :, :-n, :], n, _gamma)
 
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    def _pixel_dif_one_6(x, n, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n, __gamma):
+            return _pixel_dif_one_distance(n) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, :, :-_n, :] + _x[:, :, :, _n:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :, :, :-n, :] - x[:, :, :, n:, :], n, _gamma)
+
+    def _pixel_dif_one(x, n, _gamma):
+        return tf.math.reduce_sum(tf.stack([_pixel_dif_one_1(x, n, _gamma),
+                                            _pixel_dif_one_2(x, n, _gamma),
+                                            _pixel_dif_one_3(x, n, _gamma),
+                                            _pixel_dif_one_4(x, n, _gamma),
+                                            _pixel_dif_one_5(x, n, _gamma),
+                                            _pixel_dif_one_6(x, n, _gamma)]))
+
+    def _pixel_dif_two_distance(n1, n2):
+        return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n2, dtype=tf.float32)))
+
+    def _pixel_dif_two_1(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, _n2:, :, :] + _x[:, :-_n1, :-_n2, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, n2:, :, :] - x[:, :-n1, :-n2, :, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_2(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, _n2:, :, :] + _x[:, _n1:, :-_n2, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, n2:, :, :] - x[:, n1:, :-n2, :, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_3(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, :-_n2, :, :] + _x[:, :-_n1, _n2:, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, :-n2, :, :] - x[:, :-n1, n2:, :, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_4(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, :-_n2, :, :] + _x[:, _n1:, _n2:, :, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, :-n2, :, :] - x[:, n1:, n2:, :, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_5(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, :, _n2:, :] + _x[:, :-_n1, :, :-_n2, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, :, n2:, :] - x[:, :-n1, :, :-n2, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_6(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, :, _n2:, :] + _x[:, _n1:, :, :-_n2, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, :, n2:, :] - x[:, n1:, :, :-n2, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_7(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, :, :-_n2, :] + _x[:, :-_n1, :, _n2:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, :, :-n2, :] - x[:, :-n1, :, n2:, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_8(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, :, :-_n2, :] + _x[:, _n1:, :, _n2:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, :, :-n2, :] - x[:, n1:, :, n2:, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_9(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, _n1:, _n2:, :] + _x[:, :, :-_n1, :-_n2, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :, n1:, n2:, :] - x[:, :, :-n1, :-n2, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_10(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, :-_n1, _n2:, :] + _x[:, :, _n1:, :-_n2, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :, :-n1, n2:, :] - x[:, :, n1:, :-n2, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_11(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, _n1:, :-_n2, :] + _x[:, :, :-_n1, _n2:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :, n1:, :-n2, :] - x[:, :, :-n1, n2:, :], n1, n2, _gamma)
+
+    def _pixel_dif_two_12(x, n1, n2, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, __gamma):
+            return _pixel_dif_two_distance(_n1, _n2) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :, :-_n1, :-_n2, :] + _x[:, :, _n1:, _n2:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :, :-n1, :-n2, :] - x[:, :, n1:, n2:, :], n1, n2, _gamma)
+
+    def _pixel_dif_two(x, n1, n2, _gamma):
+        return tf.math.reduce_sum(tf.stack([_pixel_dif_two_1(x, n1, n2, _gamma),
+                                            _pixel_dif_two_2(x, n1, n2, _gamma),
+                                            _pixel_dif_two_3(x, n1, n2, _gamma),
+                                            _pixel_dif_two_4(x, n1, n2, _gamma),
+                                            _pixel_dif_two_5(x, n1, n2, _gamma),
+                                            _pixel_dif_two_6(x, n1, n2, _gamma),
+                                            _pixel_dif_two_7(x, n1, n2, _gamma),
+                                            _pixel_dif_two_8(x, n1, n2, _gamma),
+                                            _pixel_dif_two_9(x, n1, n2, _gamma),
+                                            _pixel_dif_two_10(x, n1, n2, _gamma),
+                                            _pixel_dif_two_11(x, n1, n2, _gamma),
+                                            _pixel_dif_two_12(x, n1, n2, _gamma)]))
+
+    def _pixel_dif_three_distance(n1, n2, n3):
+        return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n2, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n3, dtype=tf.float32)))
+
+    def _pixel_dif_three_1(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, _n2:, _n3:, :] + _x[:, :-_n1, :-_n2, :-_n3, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, n2:, n3:, :] - x[:, :-n1, :-n2, :-n3, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_2(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, _n2:, _n3:, :] + _x[:, _n1:, :-_n2, :-_n3, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, n2:, n3:, :] - x[:, n1:, :-n2, :-n3, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_3(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, :-_n2, _n3:, :] + _x[:, :-_n1, _n2:, :-_n3, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, :-n2, n3:, :] - x[:, :-n1, n2:, :-n3, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_4(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, _n2:, :-_n3, :] + _x[:, :-_n1, :-_n2, _n3:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, n2:, :n3, :] - x[:, :-n1, :-n2, n3:, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_5(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, :-_n2, _n3:, :] + _x[:, _n1:, _n2:, :-_n3, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, :-n2, n3:, :] - x[:, n1:, n2:, :-n3, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_6(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, _n2:, :-_n3, :] + _x[:, _n1:, :-_n2, _n3:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, n2:, :-n3, :] - x[:, n1:, :-n2, n3:, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_7(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, _n1:, :-_n2, :-_n3, :] + _x[:, :-_n1, _n2:, _n3:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, n1:, :-n2, :-n3, :] - x[:, :-n1, n2:, n3:, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three_8(x, n1, n2, n3, _gamma):
+        def _pixel_dif(_x, current_pixel_dif, _n1, _n2, _n3, __gamma):
+            return _pixel_dif_three_distance(n1, n2, n3) * \
+                   tf.math.reduce_mean(tf.math.square(current_pixel_dif) /
+                                       ((_x[:, :-_n1, :-_n2, :-_n3, :] + _x[:, _n1:, _n2:, _n3:, :]) +
+                                        (__gamma * tf.math.abs(current_pixel_dif))))
+
+        return _pixel_dif(x, x[:, :-n1, :-n2, :-n3, :] - x[:, n1:, n2:, n3:, :], n1, n2, n3, _gamma)
+
+    def _pixel_dif_three(x, n1, n2, n3, _gamma):
+        return tf.math.reduce_sum(tf.stack([_pixel_dif_three_1(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_2(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_3(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_4(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_5(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_6(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_7(x, n1, n2, n3, _gamma),
+                                            _pixel_dif_three_8(x, n1, n2, n3, _gamma)]))
+
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
+    y_pred = tf.math.subtract(y_pred, tf.math.reduce_min(y_pred))
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
 
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
 
-    y_pred = y_pred - tf.math.reduce_min(y_pred)
-    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
-
     gamma = 0.0
-
-    pixel_dif = []
 
     # Calculate the difference of neighboring pixel-values.
     # The images are shifted one pixel along the height, width and depth by slicing.
     # Calculate the total variation by taking the absolute value of the
-    # pixel-differences
-    pixel_dif = _relative_difference_loss(y_pred, 1, gamma, pixel_dif)
+    # pixel-differences summing over the appropriate axis.
+    pixel_dif = tf.reduce_sum(_pixel_dif_one(y_pred, 1, gamma))
+    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_two(y_pred, 1, 1, gamma))
+    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_three(y_pred, 1, 1, 1, gamma))
 
-    # summing over the appropriate axis.
-    return tf.reduce_mean(tf.convert_to_tensor(pixel_dif))
+    return pixel_dif / 26.0
 
 
 def log_cosh_relative_difference_loss(y_true, y_pred):
-    return ((1.0 * log_cosh_loss(y_true, y_pred)) + (1e-01 * relative_difference_loss(y_true, y_pred))) / 2.0
+    return (log_cosh_loss(y_true, y_pred) + (1e01 * relative_difference_loss(y_true, y_pred))) / 2.0
 
 
-# https://stackoverflow.com/questions/46619869/how-to-specify-the-correlation-coefficient-as-the-loss-function-in-keras
 def correlation_coefficient_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    def _correlation_coefficient(xm, ym):
+        return 1.0 - tf.math.square(tf.math.maximum(
+            tf.math.minimum(
+                tf.math.reduce_sum((xm * ym)) /
+                tf.math.sqrt(tf.math.reduce_sum(tf.math.square(xm)) * tf.math.reduce_sum(tf.math.square(ym))),
+                1.0),
+            -1.0))
 
-    mx = k.backend.mean(y_true)
-    my = k.backend.mean(y_pred)
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-    xm = y_true - mx
-    ym = y_pred - my
-
-    r_num = k.backend.sum(tf.multiply(xm, ym))
-    r_den = k.backend.sqrt(tf.multiply(k.backend.sum(k.backend.square(xm)), k.backend.sum(k.backend.square(ym))))
-    r = r_num / r_den
-
-    r = k.backend.maximum(k.backend.minimum(r, 1.0), -1.0)
-
-    return 1 - k.backend.square(r)
+    return _correlation_coefficient(y_true - tf.math.reduce_mean(y_true), y_pred - tf.math.reduce_mean(y_pred))
 
 
-def accuracy_correlation_coefficient(y_true, y_pred):
+def correlation_coefficient_accuracy(y_true, y_pred):
     return (correlation_coefficient_loss(y_true, y_pred) * -1.0) + 1.0

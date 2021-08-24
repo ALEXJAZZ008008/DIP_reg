@@ -7,7 +7,7 @@ import math
 import numpy as np
 import scipy.stats
 import scipy.ndimage
-from sklearn.preprocessing import StandardScaler, PowerTransformer
+from sklearn.preprocessing import StandardScaler, PowerTransformer, MinMaxScaler
 from tqdm import trange
 
 import parameters

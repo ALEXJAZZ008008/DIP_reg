@@ -26,7 +26,7 @@ def get_encoder(x, kernel_weight, activity_sparseness):
     layer_depth = [4, 8, 16, 32]
     layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [2, 4, 8, 16]
+    layer_groups = [2, 2, 2, 2]
 
     unet_connections = []
 
@@ -55,7 +55,7 @@ def get_latent(x, kernel_weight, activity_sparseness):
     layer_layers = [2]
     layer_depth = [64]
     layer_kernel_size = [(3, 3, 3)]
-    layer_groups = [32]
+    layer_groups = [2]
 
     # layer 1
     for i in trange(len(layer_layers)):
@@ -73,7 +73,7 @@ def get_decoder(x, unet_connections, kernel_weight, activity_sparseness):
     layer_depth = [32, 16, 8, 4]
     layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [16, 8, 4, 2]
+    layer_groups = [2, 2, 2, 2]
 
     for i in trange(len(layer_depth)):
         x = layers.get_transpose_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
@@ -131,11 +131,11 @@ def get_model(input_shape):
 
     if parameters.relative_difference_bool:
         model.compile(optimizer=k.optimizers.Nadam(clipvalue=6.0),
-                      loss={"output": loss.log_cosh_relative_difference_loss}, loss_weights=[1.0],
-                      metrics=[loss.accuracy_correlation_coefficient])
+                      loss={"output": loss.log_cosh_total_variation_loss}, loss_weights=[1.0],
+                      metrics=[loss.correlation_coefficient_accuracy])
     else:
         model.compile(optimizer=k.optimizers.Nadam(clipvalue=6.0),
                       loss={"output": loss.log_cosh_loss}, loss_weights=[1.0],
-                      metrics=[loss.accuracy_correlation_coefficient])
+                      metrics=[loss.correlation_coefficient_accuracy])
 
     return model
