@@ -3,12 +3,19 @@
 # For internal research only.
 
 
+import tensorflow as tf
 import tensorflow.keras as k
 from tqdm import trange
 
+import main
+import parameters
 import layers
 import loss
-import parameters
+
+
+if main.reproducible_bool:
+    # 4. Set `tensorflow` pseudo-random generator at a fixed value
+    tf.random.set_seed(main.seed_value)
 
 
 def get_input(input_shape):
@@ -80,9 +87,7 @@ def get_decoder(x, unet_connections, kernel_weight, activity_sparseness):
                                                    kernel_weight, activity_sparseness)
         x = k.layers.UpSampling3D(size=layer_stride[i])(x)
 
-        unet_connection_x = unet_connections.pop()
-
-        x = k.layers.Add()([x, unet_connection_x])
+        x = k.layers.Concatenate()([x, unet_connections.pop()])
 
         for _ in trange(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
@@ -100,6 +105,8 @@ def get_decoder(x, unet_connections, kernel_weight, activity_sparseness):
                         padding="valid",
                         kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0),
+                        kernel_regularizer=k.regularizers.l2(l2=kernel_weight),
+                        activity_regularizer=k.regularizers.l1(l1=activity_sparseness),
                         name="output")(x)
 
     return x
@@ -108,8 +115,8 @@ def get_decoder(x, unet_connections, kernel_weight, activity_sparseness):
 def get_tensors(input_shape):
     print("get_tensors")
 
-    kernel_weight = 0.0
-    activity_sparseness = 0.0
+    kernel_weight = 1e-05
+    activity_sparseness = 1e-10
 
     x, input_x = get_input(input_shape)
 

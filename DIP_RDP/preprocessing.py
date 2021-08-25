@@ -7,12 +7,16 @@ import math
 import numpy as np
 import scipy.stats
 import scipy.ndimage
-from sklearn.preprocessing import StandardScaler, PowerTransformer, MinMaxScaler
+from sklearn.preprocessing import StandardScaler, PowerTransformer
 from tqdm import trange
 
+import main
 import parameters
 
-rng = np.random.default_rng()
+
+if main.reproducible_bool:
+    # 3. Set `numpy` pseudo-random generator at a fixed value
+    np.random.seed(main.seed_value)
 
 
 def get_next_geometric_value(an, a0):
@@ -81,6 +85,35 @@ def data_upsample(data, data_type, new_resolution=None):
     return data
 
 
+# https://github.com/scikit-learn/scikit-learn/blob/2beed5584/sklearn/preprocessing/_data.py#L2938
+def yeo_johnson_inverse_transform(power_transformer, x):
+    def _yeo_johnson_inverse_transform(_x, _lmbda):
+        _x_inv = np.zeros_like(_x)
+        pos = _x >= 0
+
+        # when x >= 0
+        if abs(_lmbda) < np.spacing(1.0):
+            _x_inv[pos] = np.exp(_x[pos]) - 1.0
+        else:  # lmbda != 0
+            _x_inv[pos] = np.power((_x[pos] * _lmbda) + 1.0, 1.0 / _lmbda) - 1.0
+
+        # when x < 0
+        if abs(_lmbda - 2.0) > np.spacing(1.0):
+            _x_inv[~pos] = 1.0 - np.power((-(2.0 - _lmbda) * _x[~pos]) + 1.0, 1.0 / (2.0 - _lmbda))
+        else:  # lmbda == 2
+            _x_inv[~pos] = 1.0 - np.exp(-_x[~pos])
+
+        return _x_inv
+
+    x_inv = x.copy()
+
+    for i, lmbda in enumerate(power_transformer.lambdas_):
+        x_inv[:, i] = np.clip(x_inv[:, i], np.min(x_inv[:, i]), (-1.0 / lmbda) - 1e-08)
+        x_inv[:, i] = _yeo_johnson_inverse_transform(x_inv[:, i], lmbda)
+
+    return x_inv
+
+
 def data_preprocessing(data, data_type, scalers=None):
     print("data_preprocessing")
 
@@ -109,9 +142,10 @@ def data_preprocessing(data, data_type, scalers=None):
             scalers.append(StandardScaler(copy=False))
             data_copy = scalers[2].fit_transform(data_copy)
         else:
-            data_copy = scalers[i][2].inverse_transform(data_copy)
-            data_copy = scalers[i][1].inverse_transform(data_copy)
-            data_copy = scalers[i][0].inverse_transform(data_copy)
+            # data_copy = scalers[i][2].inverse_transform(data_copy)
+            # data_copy = yeo_johnson_inverse_transform(scalers[i][1], data_copy)
+            # data_copy = scalers[i][0].inverse_transform(data_copy)
+            pass
 
         data_copy = data_copy.reshape(data_copy_shape)
 
@@ -132,14 +166,14 @@ def redistribute(data, new_distribution=None):
     data_copy_shape = data_copy.shape
     data_copy = data_copy.reshape(-1, 1)
 
-    data_copy = StandardScaler().fit_transform(data_copy)
+    data_copy = StandardScaler(copy=False).fit_transform(data_copy)
 
     if new_distribution is not None:
         new_distribution = new_distribution.reshape(-1, 1)
 
-        scaler = StandardScaler()
-        scaler.fit(new_distribution)
-        data_copy = scaler.inverse_transform(data_copy)
+        standard_scaler = StandardScaler(copy=False)
+        standard_scaler.fit(new_distribution)
+        data_copy = standard_scaler.inverse_transform(data_copy)
 
     data_copy = data_copy.reshape(data_copy_shape)
 

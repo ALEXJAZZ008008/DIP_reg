@@ -8,7 +8,6 @@ import re
 import shutil
 import random
 import numpy as np
-import numpy.random
 import scipy.constants
 import scipy.stats
 import scipy.ndimage
@@ -18,14 +17,32 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 from tqdm import trange
 
-import parameters
-import transcript
-import preprocessing
-import architecture
 
+reproducible_bool = True
 
-random.seed()
+if reproducible_bool:
+    # Seed value (can actually be different for each attribution step)
+    seed_value = 0
 
+    # 1. Set `PYTHONHASHSEED` environment variable at a fixed value
+    os.environ['PYTHONHASHSEED'] = str(seed_value)
+
+    # 2. Set `python` built-in pseudo-random generator at a fixed value
+    random.seed(seed_value)
+
+    # 3. Set `numpy` pseudo-random generator at a fixed value
+    np.random.seed(seed_value)
+
+    # 4. Set `tensorflow` pseudo-random generator at a fixed value
+    tf.random.set_seed(seed_value)
+
+    # 5. Configure a new global `tensorflow` session
+    # ONLY WORKS WITH TF V1
+    # session_conf = tf.compat.v1.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=1)
+    # sess = tf.compat.v1.Session(graph=tf.compat.v1.get_default_graph(), config=session_conf)
+    # tf.compat.v1.keras.backend.set_session(sess)
+else:
+    random.seed()
 
 float_sixteen_bool = True  # set the network to use float16 data
 cpu_bool = False  # if using CPU, set to true: disables mixed precision computation
@@ -38,6 +55,13 @@ if float_sixteen_bool and not cpu_bool:
 else:
     policy = k.mixed_precision.Policy(tf.dtypes.float32.name)
     k.mixed_precision.set_global_policy(policy)
+
+
+import transcript
+import parameters
+import preprocessing
+import architecture
+
 
 data_path = "{0}/DIP_RDP_data/xcat/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output".format(os.getcwd())
@@ -152,7 +176,7 @@ def get_train_data():
         y.append(current_y_train_path)
 
         if gaussian_noise is None:
-            gaussian_noise = preprocessing.redistribute(numpy.random.normal(size=current_array.shape))
+            gaussian_noise = preprocessing.redistribute(np.random.normal(size=current_array.shape))
 
         for j in trange(current_array.shape[2]):
             current_array[:, :, j] = scipy.ndimage.gaussian_filter(current_array[:, :, j], sigma=2.5, mode="mirror")

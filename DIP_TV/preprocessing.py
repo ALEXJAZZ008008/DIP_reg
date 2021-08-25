@@ -12,8 +12,6 @@ from tqdm import trange
 
 import parameters
 
-rng = np.random.default_rng()
-
 
 def get_next_geometric_value(an, a0):
     print("get_next_geometric_value")

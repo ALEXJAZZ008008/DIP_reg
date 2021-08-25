@@ -8,6 +8,17 @@ import tensorflow as tf
 import tensorflow.keras as k
 
 
+import main
+
+
+if main.reproducible_bool:
+    # 3. Set `numpy` pseudo-random generator at a fixed value
+    np.random.seed(main.seed_value)
+
+    # 4. Set `tensorflow` pseudo-random generator at a fixed value
+    tf.random.set_seed(main.seed_value)
+
+
 # https://www.machinecurve.com/index.php/2020/02/10/using-constant-padding-reflection-padding-and-replication-padding-with-keras/#reflection-padding
 '''
   3D Reflection Padding

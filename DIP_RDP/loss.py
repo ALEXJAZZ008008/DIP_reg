@@ -6,6 +6,14 @@
 import tensorflow as tf
 
 
+import main
+
+
+if main.reproducible_bool:
+    # 4. Set `tensorflow` pseudo-random generator at a fixed value
+    tf.random.set_seed(main.seed_value)
+
+
 def log_cosh_loss(y_true, y_pred):
     def _log_cosh(x):
         return (x + tf.math.softplus(-2.0 * x)) - tf.math.log(2.0)
@@ -36,7 +44,7 @@ def total_variation_loss(_, y_pred):
         return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, :, n:, :] - x[:, :, :, :-n, :]))
 
     def _pixel_dif_one_6(x, n):
-        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, :, :-n, :] - x[:, :, :, :n, :]))
+        return _pixel_dif_one_distance(n) * tf.math.reduce_mean(tf.math.square(x[:, :, :, :-n, :] - x[:, :, :, n:, :]))
 
     def _pixel_dif_one(x, n):
         return tf.math.reduce_sum(tf.stack([_pixel_dif_one_1(x, n),
@@ -131,7 +139,7 @@ def total_variation_loss(_, y_pred):
 
     def _pixel_dif_three_4(x, n1, n2, n3):
         return _pixel_dif_three_distance(n1, n2, n3) * \
-               tf.math.reduce_mean(tf.math.square(x[:, n1:, n2:, :-n3, :] - x[:, :-n1, :-n2, -n3:, :]))
+               tf.math.reduce_mean(tf.math.square(x[:, n1:, n2:, :-n3, :] - x[:, :-n1, :-n2, n3:, :]))
 
     def _pixel_dif_three_5(x, n1, n2, n3):
         return _pixel_dif_three_distance(n1, n2, n3) * \
@@ -160,19 +168,22 @@ def total_variation_loss(_, y_pred):
                                             _pixel_dif_three_8(x, n1, n2, n3)]))
 
     y_pred = tf.cast(y_pred, dtype=tf.float32)
-    y_pred = tf.math.subtract(y_pred, tf.math.reduce_min(y_pred))
-    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
+    y_pred = y_pred - tf.math.reduce_min(y_pred)
 
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
+
+    pixel_dif = 0.0
 
     # Calculate the difference of neighboring pixel-values.
     # The images are shifted one pixel along the height, width and depth by slicing.
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences summing over the appropriate axis.
-    pixel_dif = tf.reduce_sum(_pixel_dif_one(y_pred, 1))
-    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_two(y_pred, 1, 1))
-    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_three(y_pred, 1, 1, 1))
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
+
+    pixel_dif = pixel_dif + _pixel_dif_one(y_pred, 1)
+    pixel_dif = pixel_dif + _pixel_dif_two(y_pred, 1, 1)
+    pixel_dif = pixel_dif + _pixel_dif_three(y_pred, 1, 1, 1)
 
     return pixel_dif / 26.0
 
@@ -461,21 +472,24 @@ def relative_difference_loss(_, y_pred):
                                             _pixel_dif_three_8(x, n1, n2, n3, _gamma)]))
 
     y_pred = tf.cast(y_pred, dtype=tf.float32)
-    y_pred = tf.math.subtract(y_pred, tf.math.reduce_min(y_pred))
-    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
+    y_pred = y_pred - tf.math.reduce_min(y_pred)
 
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
 
     gamma = 0.0
 
+    pixel_dif = 0.0
+
     # Calculate the difference of neighboring pixel-values.
     # The images are shifted one pixel along the height, width and depth by slicing.
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences summing over the appropriate axis.
-    pixel_dif = tf.reduce_sum(_pixel_dif_one(y_pred, 1, gamma))
-    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_two(y_pred, 1, 1, gamma))
-    pixel_dif = pixel_dif + tf.reduce_sum(_pixel_dif_three(y_pred, 1, 1, 1, gamma))
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [1, 1], [0, 0]], "REFLECT")
+
+    pixel_dif = pixel_dif + _pixel_dif_one(y_pred, 1, gamma)
+    pixel_dif = pixel_dif + _pixel_dif_two(y_pred, 1, 1, gamma)
+    pixel_dif = pixel_dif + _pixel_dif_three(y_pred, 1, 1, 1, gamma)
 
     return pixel_dif / 26.0
 
