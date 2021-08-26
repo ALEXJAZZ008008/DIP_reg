@@ -13,6 +13,7 @@ import scipy.stats
 import scipy.ndimage
 import tensorflow as tf
 import tensorflow.keras as k
+import pickle
 import matplotlib.pyplot as plt
 import nibabel as nib
 from tqdm import trange
@@ -153,7 +154,6 @@ def get_train_data():
     if not os.path.exists(y_train_output_path):
         os.makedirs(y_train_output_path, mode=0o770)
 
-    current_volume = None
     full_current_shape = None
     windowed_full_input_axial_size = None
     current_shape = None
@@ -172,11 +172,11 @@ def get_train_data():
             current_shape = current_array[0].shape
 
         current_y_train_path = "{0}/{1}.npy".format(y_train_output_path, str(i))
-        np.save(current_y_train_path, current_array)
+        np.save(current_y_train_path, current_array, allow_pickle=True, fix_imports=False)
         y.append(current_y_train_path)
 
         if gaussian_noise is None:
-            gaussian_noise = preprocessing.redistribute(np.random.normal(size=current_array.shape))
+            gaussian_noise = preprocessing.redistribute([np.random.normal(size=current_array.shape)], "numpy")[0]
 
         for j in trange(current_array.shape[2]):
             current_array[:, :, j] = scipy.ndimage.gaussian_filter(current_array[:, :, j], sigma=2.5, mode="mirror")
@@ -185,13 +185,13 @@ def get_train_data():
             for l in trange(current_array.shape[1]):
                 current_array[j, l, :] = scipy.ndimage.gaussian_filter(current_array[j, l, :], sigma=0.5, mode="mirror")
 
-        current_array = preprocessing.redistribute(current_array)
+        current_array = preprocessing.redistribute([current_array], "numpy")[0]
 
         gaussian_weight = parameters.gaussian_sigma
         current_array = (current_array + (gaussian_weight * gaussian_noise)) / (1.0 + gaussian_weight)
 
         current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
-        np.save(current_x_train_path, current_array)
+        np.save(current_x_train_path, current_array, allow_pickle=True, fix_imports=False)
         x.append(current_x_train_path)
 
     y = np.asarray(y)
@@ -216,31 +216,34 @@ def get_train_data():
             current_array, _ = get_data_windows(current_array)
 
             current_gt_train_path = "{0}/{1}.npy".format(gt_train_output_path, str(i))
-            np.save(current_gt_train_path, current_array)
+            np.save(current_gt_train_path, current_array, allow_pickle=True, fix_imports=False)
             gt.append(current_gt_train_path)
 
         gt = np.asarray(gt)
     else:
         gt = None
 
-    return x, y, current_volume, full_current_shape, windowed_full_input_axial_size, current_shape, gt
+    return x, y, full_current_shape, windowed_full_input_axial_size, current_shape, gt
 
 
 def get_preprocessed_train_data():
     print("get_preprocessed_train_data")
 
-    x, y, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = get_train_data()
+    x, y, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = get_train_data()
 
     x = preprocessing.data_upsample(x, "path")
     y = preprocessing.data_upsample(y, "path")
-    gt = preprocessing.data_upsample(gt, "path")
+
+    if gt is not None:
+        gt = preprocessing.data_upsample(gt, "path")
 
     x, _ = preprocessing.data_preprocessing(x, "path")
-    y, input_preprocessing = preprocessing.data_preprocessing(y, "path")
-    gt, _ = preprocessing.data_preprocessing(gt, "path")
+    y, preprocessing_steps = preprocessing.data_preprocessing(y, "path")
 
-    return x, y, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, \
-           input_preprocessing, gt
+    if gt is not None:
+        gt, _ = preprocessing.data_preprocessing(gt, "path")
+
+    return x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt
 
 
 # https://stackoverflow.com/questions/43137288/how-to-determine-needed-memory-of-keras-model
@@ -298,16 +301,16 @@ def get_evaluation_score(prediction, gt):
     return accuracy
 
 
-def output_window_predictions(x_prediction, y, input_volume, window_input_shape, input_preprocessing,
+def output_window_predictions(x_prediction, y_train_iteration, preprocessing_steps, window_input_shape,
                               current_output_path, j):
     print("output_window_predictions")
 
     x_prediction = x_prediction.astype(np.float64)
-    y = y.astype(np.float64)
+    y_train_iteration = y_train_iteration.astype(np.float64)
 
-    x_prediction = preprocessing.redistribute(x_prediction, y)
+    x_prediction = preprocessing.redistribute([x_prediction], "numpy", True, [y_train_iteration], "numpy")[0]
+    x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps)[0][0]
 
-    x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", [input_preprocessing])[0]
     x_prediction = np.squeeze(preprocessing.data_upsample([x_prediction], "numpy", window_input_shape)[0])
 
     output_volume = nib.Nifti1Image(x_prediction, np.eye(4), nib.Nifti1Header())
@@ -326,9 +329,8 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
         number_of_windows = int(np.ceil(full_input_shape[-1] / parameters.data_window_size))
         number_of_overlaps = number_of_windows - 1
 
-        overlap_size = \
-            int(np.ceil((((parameters.data_window_size * number_of_windows) -
-                          full_input_shape[-1]) / number_of_overlaps)))
+        overlap_size = int(np.ceil((((parameters.data_window_size * number_of_windows) -
+                                     full_input_shape[-1]) / number_of_overlaps)))
         overlap_index = int(np.ceil(parameters.data_window_size - overlap_size))
 
         output_arrays = []
@@ -345,7 +347,7 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
             output_arrays.append(current_output_array)
 
         output_array = np.nanmean(np.asarray(output_arrays), axis=0)
-        output_array = np.nan_to_num(output_array)
+        output_array = np.nan_to_num(output_array, copy=False)
     else:
         output_array = nib.load(window_data_paths[0]).get_data()
 
@@ -363,12 +365,12 @@ def train_model():
     print("train_model")
 
     # get data and lables
-    x, y, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, input_preprocessing, \
-    gt = get_preprocessed_train_data()
+    x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = \
+        get_preprocessed_train_data()
 
-    data_shape = np.load(x[0], allow_pickle=True)[0].shape
+    data_shape = np.load(x[0], mmap_mode="r+", allow_pickle=True)[0].shape
 
-    model = architecture.get_model(data_shape)
+    model, optimiser, loss = architecture.get_model(data_shape)
     model.summary()
 
     print("Memory usage:\t{0}".format(str(get_model_memory_usage(1, model))))
@@ -385,7 +387,7 @@ def train_model():
         if not os.path.exists(patient_output_path):
             os.makedirs(patient_output_path, mode=0o770)
 
-        number_of_windows = np.load(x[i], allow_pickle=True).shape[0]
+        number_of_windows = np.load(x[i], mmap_mode="r+", allow_pickle=True).shape[0]
 
         current_window_data_paths = []
 
@@ -404,8 +406,14 @@ def train_model():
             if not os.path.exists(plot_output_path):
                 os.makedirs(plot_output_path, mode=0o770)
 
-            x_train_iteration = np.asarray([np.load(x[i], allow_pickle=True)[j]])
-            y_train_iteration = np.asarray([np.load(y[i], allow_pickle=True)[j]])
+            model_output_path = "{0}/models".format(window_output_path)
+
+            # create output directory
+            if not os.path.exists(model_output_path):
+                os.makedirs(model_output_path, mode=0o770)
+
+            x_train_iteration = np.asarray([np.load(x[i], mmap_mode="r+", allow_pickle=True)[j]])
+            y_train_iteration = np.asarray([np.load(y[i], mmap_mode="r+", allow_pickle=True)[j]])
 
             if float_sixteen_bool:
                 x_train_iteration = x_train_iteration.astype(np.float16)
@@ -415,13 +423,14 @@ def train_model():
                 y_train_iteration = y_train_iteration.astype(np.float32)
 
             if gt is not None:
-                gt_prediction = np.asarray([np.load(gt[i], allow_pickle=True)[j]])
+                gt_prediction = np.asarray([np.load(gt[i], mmap_mode="r+", allow_pickle=True)[j]])
             else:
                 gt_prediction = None
 
             iteration = 0
             loss_array = []
             relative_plateau_cutoff = None
+            previous_model_weight_array = []
 
             while True:
                 print("Iteration:\t{0}".format(str(iteration)))
@@ -429,32 +438,71 @@ def train_model():
                 current_loss_increase_patience = 0
 
                 while True:
-                    previous_model_weights = model.get_weights()
+                    previous_model_weight_array.append("{0}/{1}.pkl".format(model_output_path, str(iteration)))
+                    pickle.dump(model.get_weights(), open(previous_model_weight_array[-1], "wb"))
 
-                    loss = model.train_on_batch(x_train_iteration, {"output": y_train_iteration}, reset_metrics=False)
+                    # Open a GradientTape to record the operations run
+                    # during the forward pass, which enables auto-differentiation.
+                    with tf.GradientTape() as tape:
 
-                    loss_array_length = len(loss_array)
+                        # Run the forward pass of the layer.
+                        # The operations that the layer applies
+                        # to its inputs are going to be recorded
+                        # on the GradientTape.
+                        logits = model(x_train_iteration, training=True)  # Logits for this minibatch
 
-                    if loss_array_length > 0:
-                        if loss[0] < loss_array[-1]:
-                            break
-                        else:
-                            if current_loss_increase_patience >= parameters.patience:
-                                print("Loss increased; allowing anyway...")
+                        # Compute the loss value for this minibatch.
+                        current_loss = loss(y_train_iteration, logits)
 
-                                break
+                    loss_array.append(current_loss)
+
+                    if relative_plateau_cutoff is None:
+                        relative_plateau_cutoff = parameters.plateau_cutoff * current_loss
+
+                    if len(loss_array) > 1:
+                        loss_gradient = np.gradient(loss_array)[-1]
+
+                        if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
+                            if current_loss > loss_array[-1]:
+                                if current_loss_increase_patience >= parameters.patience:
+                                    print("WARNING Loss increased; patience reached, allowing anyway!")
+
+                                    break
+                                else:
+                                    print("WARNING Loss increased; backing up...")
+
+                                    model.set_weights(pickle.load(open(previous_model_weight_array[-1], "rb")))
+
+                                    previous_model_weight_array.pop()
+                                    loss_array.pop()
+
+                                    if current_loss_increase_patience > 1:
+                                        previous_model_weight_array.pop()
+                                        loss_array.pop()
+
+                                        iteration = iteration - 1
+
+                                    current_loss_increase_patience = current_loss_increase_patience + 1
                             else:
-                                print("Loss increased; trying again...")
-
-                                model.set_weights(previous_model_weights)
-
-                                current_loss_increase_patience = current_loss_increase_patience + 1
+                                break
+                        else:
+                            break
                     else:
                         break
 
-                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(loss[0]), str(loss[1])))
+                # Use the gradient tape to automatically retrieve
+                # the gradients of the trainable variables with respect to the loss.
+                grads = tape.gradient(current_loss, model.trainable_weights)
 
-                x_prediction = model.predict_on_batch(x_train_iteration)
+                # Run one step of gradient descent by updating
+                # the value of the variables to minimize the loss.
+                optimiser.apply_gradients(zip(grads, model.trainable_weights))
+
+                x_prediction = np.squeeze(model(x_train_iteration, training=False))
+
+                current_accuracy = get_evaluation_score(x_prediction, y_train_iteration)
+
+                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(float(current_loss)), str(current_accuracy)))
 
                 if gt is not None:
                     gt_accuracy = get_evaluation_score(x_prediction, gt_prediction)
@@ -487,21 +535,24 @@ def train_model():
                     plt.imshow(gt_plot[:, :, int(gt_plot.shape[2] / 2)], cmap="Greys")
 
                 plt.tight_layout()
-                plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)),
-                            format="png", dpi=600, bbox_inches="tight")
+                plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)), format="png", dpi=600,
+                            bbox_inches="tight")
                 plt.close()
 
+                plot_files = os.listdir(plot_output_path)
+
+                for l in trange(len(plot_files)):
+                    current_plot_file = plot_files[l].strip()
+
+                    split_array = current_plot_file.split(".png")
+
+                    if len(split_array) >= 2:
+                        if int(split_array[0]) > iteration:
+                            os.remove("{0}/{1}".format(plot_output_path, current_plot_file))
+
                 if parameters.relative_difference_bool:
-                    if loss_array_length >= parameters.patience:
-                        loss_array.pop(0)
-
-                    loss_array.append(loss[0])
-
-                    if relative_plateau_cutoff is None:
-                        relative_plateau_cutoff = parameters.plateau_cutoff * loss_array[0]
-
-                    if loss_array_length + 1 >= parameters.patience:
-                        loss_gradient = np.gradient(loss_array)
+                    if len(loss_array) >= parameters.patience:
+                        loss_gradient = np.gradient(loss_array)[-parameters.patience:]
 
                         if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
                             print("Reached plateau: Exiting...")
@@ -515,8 +566,8 @@ def train_model():
 
                 iteration = iteration + 1
 
-            current_window_data_paths.append(output_window_predictions(x_prediction, y_train_iteration, input_volume,
-                                                                       window_input_shape, input_preprocessing,
+            current_window_data_paths.append(output_window_predictions(x_prediction, y_train_iteration,
+                                                                       preprocessing_steps, window_input_shape,
                                                                        window_output_path, j))
 
         output_patient_time_point_predictions(current_window_data_paths, windowed_full_input_axial_size,

@@ -7,7 +7,7 @@ import tensorflow.keras as k
 from tqdm import trange
 
 import layers
-import loss
+import losses
 import parameters
 
 
@@ -122,11 +122,11 @@ def get_model(input_shape):
 
     if parameters.total_variation_bool:
         model.compile(optimizer=k.optimizers.SGD(learning_rate=0.01),
-                      loss={"output": loss.mean_square_error_total_variation_loss}, loss_weights=[1.0],
-                      metrics=[loss.accuracy_correlation_coefficient])
+                      loss={"output": losses.mean_square_error_total_variation_loss}, loss_weights=[1.0],
+                      metrics=[losses.accuracy_correlation_coefficient])
     else:
         model.compile(optimizer=k.optimizers.SGD(learning_rate=0.01),
-                      loss={"output": loss.mean_squared_error_loss}, loss_weights=[1.0],
-                      metrics=[loss.accuracy_correlation_coefficient])
+                      loss={"output": losses.mean_squared_error_loss}, loss_weights=[1.0],
+                      metrics=[losses.accuracy_correlation_coefficient])
 
     return model

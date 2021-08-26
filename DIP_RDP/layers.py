@@ -28,7 +28,7 @@ if main.reproducible_bool:
 
 
 class ReflectionPadding3D(k.layers.Layer):
-    def __init__(self, padding=(1, 1, 1), **kwargs):
+    def __init__(self, padding=(0, 0, 0), **kwargs):
         self.padding = tuple(padding)
         super(ReflectionPadding3D, self).__init__(**kwargs)
 
@@ -100,7 +100,7 @@ def channel_shuffle(x, groups):
     return x
 
 
-def get_convolution_layer(x, depth, size, stride, groups, kernel_weight, activity_sparseness):
+def get_convolution_layer(x, depth, size, stride, groups, kernel_regularisation, sparseness):
     print("get_convolution_layer")
 
     x = get_reflection_padding(x, size)
@@ -112,16 +112,18 @@ def get_convolution_layer(x, depth, size, stride, groups, kernel_weight, activit
                         padding="valid",
                         kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0),
-                        kernel_regularizer=k.regularizers.l2(l2=kernel_weight),
-                        activity_regularizer=k.regularizers.l1(l1=activity_sparseness))(x)
+                        kernel_regularizer=k.regularizers.l2(l2=kernel_regularisation),
+                        activity_regularizer=k.regularizers.l1(l1=sparseness))(x)
     x = k.layers.BatchNormalization()(x)
-    x = k.layers.ReLU(negative_slope=0.2)(x)
+    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
+                       alpha_regularizer=k.regularizers.l1(l1=sparseness),
+                       shared_axes=[1, 2, 3])(x)
     x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
 
     return x
 
 
-def get_transpose_convolution_layer(x, depth, size, stride, groups, kernel_weight, activity_sparseness):
+def get_transpose_convolution_layer(x, depth, size, stride, groups, kernel_regularisation, sparseness):
     print("get_transpose_convolution_layer")
 
     x = k.layers.Conv3DTranspose(filters=depth,
@@ -132,10 +134,12 @@ def get_transpose_convolution_layer(x, depth, size, stride, groups, kernel_weigh
                                  padding="same",
                                  kernel_initializer="he_normal",
                                  bias_initializer=k.initializers.Constant(0.0),
-                                 kernel_regularizer=k.regularizers.l2(l2=kernel_weight),
-                                 activity_regularizer=k.regularizers.l1(l1=activity_sparseness))(x)
+                                 kernel_regularizer=k.regularizers.l2(l2=kernel_regularisation),
+                                 activity_regularizer=k.regularizers.l1(l1=sparseness))(x)
     x = k.layers.BatchNormalization()(x)
-    x = k.layers.ReLU(negative_slope=0.2)(x)
+    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
+                       alpha_regularizer=k.regularizers.l1(l1=sparseness),
+                       shared_axes=[1, 2, 3])(x)
     x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
 
     return x

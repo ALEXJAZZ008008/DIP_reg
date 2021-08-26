@@ -90,6 +90,13 @@ for i in range(len(patient_time_points)):
                         if window_split_bool:
                             split_bool = True
 
+                            if line == "WARNING Loss increased; backing up...":
+                                output.pop()
+
+                                split_bool = False
+
+                                break
+
                             for l in range(len(split[k])):
                                 split_array = line.split(split[k][l])
 
