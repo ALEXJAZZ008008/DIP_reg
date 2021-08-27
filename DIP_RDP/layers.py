@@ -112,13 +112,14 @@ def get_convolution_layer(x, depth, size, stride, groups, kernel_regularisation,
                         padding="valid",
                         kernel_initializer="he_normal",
                         bias_initializer=k.initializers.Constant(0.0),
-                        kernel_regularizer=k.regularizers.l2(l2=kernel_regularisation),
-                        activity_regularizer=k.regularizers.l1(l1=sparseness))(x)
+                        kernel_regularizer=k.regularizers.l2(l2=kernel_regularisation))(x)
+    x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
     x = k.layers.BatchNormalization()(x)
     x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
                        alpha_regularizer=k.regularizers.l1(l1=sparseness),
                        shared_axes=[1, 2, 3])(x)
-    x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
+    x = k.layers.ActivityRegularization(l1=sparseness)(x)
+
 
     return x
 
@@ -134,12 +135,12 @@ def get_transpose_convolution_layer(x, depth, size, stride, groups, kernel_regul
                                  padding="same",
                                  kernel_initializer="he_normal",
                                  bias_initializer=k.initializers.Constant(0.0),
-                                 kernel_regularizer=k.regularizers.l2(l2=kernel_regularisation),
-                                 activity_regularizer=k.regularizers.l1(l1=sparseness))(x)
+                                 kernel_regularizer=k.regularizers.l2(l2=kernel_regularisation))(x)
+    x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
     x = k.layers.BatchNormalization()(x)
     x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
                        alpha_regularizer=k.regularizers.l1(l1=sparseness),
                        shared_axes=[1, 2, 3])(x)
-    x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
+    x = k.layers.ActivityRegularization(l1=sparseness)(x)
 
     return x

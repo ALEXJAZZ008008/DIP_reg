@@ -35,7 +35,7 @@ def data_upsample(data, data_type, new_resolution=None):
 
     for i in trange(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i], mmap_mode="r+", allow_pickle=True)
+            data_copy = np.load(data[i])
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -77,7 +77,7 @@ def data_upsample(data, data_type, new_resolution=None):
         data_copy = np.expand_dims(data_copy, -1)
 
         if data_type == "path":
-            np.save(data[i], data_copy, allow_pickle=True, fix_imports=False)
+            np.save(data[i], data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy
@@ -130,7 +130,7 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
 
     for i in trange(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i], mmap_mode="r+", allow_pickle=True)
+            data_copy = np.load(data[i])
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -163,7 +163,7 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
         data_copy = data_copy.reshape(data_copy_shape)
 
         if data_type == "path":
-            np.save(data[i], data_copy, allow_pickle=True, fix_imports=False)
+            np.save(data[i], data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy
@@ -176,7 +176,7 @@ def redistribute(data, data_type, robust_bool=False, new_distribution=None, new_
 
     for i in trange(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i], mmap_mode="r+", allow_pickle=True)
+            data_copy = np.load(data[i])
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -193,7 +193,7 @@ def redistribute(data, data_type, robust_bool=False, new_distribution=None, new_
 
         if new_distribution is not None:
             if new_distribution_type == "path":
-                new_distribution_copy = np.load(new_distribution[i], mmap_mode="r+", allow_pickle=True)
+                new_distribution_copy = np.load(new_distribution[i])
             else:
                 if new_distribution_type == "numpy":
                     new_distribution_copy = new_distribution[i].copy()
@@ -213,7 +213,7 @@ def redistribute(data, data_type, robust_bool=False, new_distribution=None, new_
         data_copy = data_copy.reshape(data_copy_shape)
 
         if data_type == "path":
-            np.save(data[i], data_copy, allow_pickle=True, fix_imports=False)
+            np.save(data[i], data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy

@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 from tqdm import trange
 
+import losses
 
 reproducible_bool = True
 
@@ -172,7 +173,7 @@ def get_train_data():
             current_shape = current_array[0].shape
 
         current_y_train_path = "{0}/{1}.npy".format(y_train_output_path, str(i))
-        np.save(current_y_train_path, current_array, allow_pickle=True, fix_imports=False)
+        np.save(current_y_train_path, current_array)
         y.append(current_y_train_path)
 
         if gaussian_noise is None:
@@ -191,7 +192,7 @@ def get_train_data():
         current_array = (current_array + (gaussian_weight * gaussian_noise)) / (1.0 + gaussian_weight)
 
         current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
-        np.save(current_x_train_path, current_array, allow_pickle=True, fix_imports=False)
+        np.save(current_x_train_path, current_array)
         x.append(current_x_train_path)
 
     y = np.asarray(y)
@@ -216,7 +217,7 @@ def get_train_data():
             current_array, _ = get_data_windows(current_array)
 
             current_gt_train_path = "{0}/{1}.npy".format(gt_train_output_path, str(i))
-            np.save(current_gt_train_path, current_array, allow_pickle=True, fix_imports=False)
+            np.save(current_gt_train_path, current_array)
             gt.append(current_gt_train_path)
 
         gt = np.asarray(gt)
@@ -288,6 +289,84 @@ def get_model_memory_usage(batch_size, model):
     gbytes = np.round(total_memory / (1024.0 ** 3), 3) + internal_model_mem_count
 
     return gbytes
+
+
+def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_array, previous_model_weight_array,
+               relative_plateau_cutoff, model_output_path, iteration):
+    current_loss_increase_patience = 0
+
+    while True:
+        previous_model_weight_array.append("{0}/{1}.pkl".format(model_output_path, str(iteration)))
+        pickle.dump(model.get_weights(), open(previous_model_weight_array[-1], "wb"))
+
+        # Open a GradientTape to record the operations run
+        # during the forward pass, which enables auto-differentiation.
+        with tf.GradientTape() as tape:
+
+            # Run the forward pass of the layer.
+            # The operations that the layer applies
+            # to its inputs are going to be recorded
+            # on the GradientTape.
+            logits = model(x_train_iteration, training=True)  # Logits for this minibatch
+
+            # Compute the loss value for this minibatch.
+            current_loss = loss(y_train_iteration, logits)
+            current_loss = current_loss + np.mean(model.losses[::3])
+            current_loss = current_loss + np.mean([model.losses[1::3], model.losses[2::3]])
+
+        loss_array.append(current_loss)
+
+        if relative_plateau_cutoff is None:
+            relative_plateau_cutoff = parameters.plateau_cutoff * current_loss
+
+        if len(loss_array) > 1:
+            loss_gradient = np.gradient(loss_array)[-1]
+
+            if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
+                if current_loss > loss_array[-1]:
+                    if current_loss_increase_patience >= parameters.patience:
+                        print("WARNING Loss increased; patience reached, allowing anyway!")
+
+                        break
+                    else:
+                        print("WARNING Loss increased; backing up...")
+
+                        model.set_weights(pickle.load(open(previous_model_weight_array[-1], "rb")))
+
+                        previous_model_weight_array.pop()
+                        loss_array.pop()
+
+                        if current_loss_increase_patience > 1:
+                            previous_model_weight_array.pop()
+                            loss_array.pop()
+
+                            iteration = iteration - 1
+
+                        current_loss_increase_patience = current_loss_increase_patience + 1
+                else:
+                    break
+            else:
+                break
+        else:
+            break
+
+    # Use the gradient tape to automatically retrieve
+    # the gradients of the trainable variables with respect to the loss.
+    grads = tape.gradient(current_loss, model.trainable_weights)
+
+    # Run one step of gradient descent by updating
+    # the value of the variables to minimize the loss.
+    optimiser.apply_gradients(zip(grads, model.trainable_weights))
+
+    return model, loss_array, previous_model_weight_array, relative_plateau_cutoff, iteration
+
+
+def test_step(model, x_train_iteration, y_train_iteration):
+    x_prediction = np.squeeze(model(x_train_iteration, training=False))
+
+    current_accuracy = get_evaluation_score(x_prediction, y_train_iteration)
+
+    return x_prediction, current_accuracy
 
 
 def get_evaluation_score(prediction, gt):
@@ -368,7 +447,7 @@ def train_model():
     x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = \
         get_preprocessed_train_data()
 
-    data_shape = np.load(x[0], mmap_mode="r+", allow_pickle=True)[0].shape
+    data_shape = np.load(x[0])[0].shape
 
     model, optimiser, loss = architecture.get_model(data_shape)
     model.summary()
@@ -387,7 +466,7 @@ def train_model():
         if not os.path.exists(patient_output_path):
             os.makedirs(patient_output_path, mode=0o770)
 
-        number_of_windows = np.load(x[i], mmap_mode="r+", allow_pickle=True).shape[0]
+        number_of_windows = np.load(x[i]).shape[0]
 
         current_window_data_paths = []
 
@@ -412,8 +491,8 @@ def train_model():
             if not os.path.exists(model_output_path):
                 os.makedirs(model_output_path, mode=0o770)
 
-            x_train_iteration = np.asarray([np.load(x[i], mmap_mode="r+", allow_pickle=True)[j]])
-            y_train_iteration = np.asarray([np.load(y[i], mmap_mode="r+", allow_pickle=True)[j]])
+            x_train_iteration = np.asarray([np.load(x[i])[j]])
+            y_train_iteration = np.asarray([np.load(y[i])[j]])
 
             if float_sixteen_bool:
                 x_train_iteration = x_train_iteration.astype(np.float16)
@@ -423,7 +502,7 @@ def train_model():
                 y_train_iteration = y_train_iteration.astype(np.float32)
 
             if gt is not None:
-                gt_prediction = np.asarray([np.load(gt[i], mmap_mode="r+", allow_pickle=True)[j]])
+                gt_prediction = np.asarray([np.load(gt[i])[j]])
             else:
                 gt_prediction = None
 
@@ -435,74 +514,13 @@ def train_model():
             while True:
                 print("Iteration:\t{0}".format(str(iteration)))
 
-                current_loss_increase_patience = 0
+                model, loss_array, previous_model_weight_array, relative_plateau_cutoff, iteration = \
+                    train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_array,
+                               previous_model_weight_array, relative_plateau_cutoff, model_output_path, iteration)
 
-                while True:
-                    previous_model_weight_array.append("{0}/{1}.pkl".format(model_output_path, str(iteration)))
-                    pickle.dump(model.get_weights(), open(previous_model_weight_array[-1], "wb"))
+                x_prediction, current_accuracy = test_step(model, x_train_iteration, y_train_iteration)
 
-                    # Open a GradientTape to record the operations run
-                    # during the forward pass, which enables auto-differentiation.
-                    with tf.GradientTape() as tape:
-
-                        # Run the forward pass of the layer.
-                        # The operations that the layer applies
-                        # to its inputs are going to be recorded
-                        # on the GradientTape.
-                        logits = model(x_train_iteration, training=True)  # Logits for this minibatch
-
-                        # Compute the loss value for this minibatch.
-                        current_loss = loss(y_train_iteration, logits)
-
-                    loss_array.append(current_loss)
-
-                    if relative_plateau_cutoff is None:
-                        relative_plateau_cutoff = parameters.plateau_cutoff * current_loss
-
-                    if len(loss_array) > 1:
-                        loss_gradient = np.gradient(loss_array)[-1]
-
-                        if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
-                            if current_loss > loss_array[-1]:
-                                if current_loss_increase_patience >= parameters.patience:
-                                    print("WARNING Loss increased; patience reached, allowing anyway!")
-
-                                    break
-                                else:
-                                    print("WARNING Loss increased; backing up...")
-
-                                    model.set_weights(pickle.load(open(previous_model_weight_array[-1], "rb")))
-
-                                    previous_model_weight_array.pop()
-                                    loss_array.pop()
-
-                                    if current_loss_increase_patience > 1:
-                                        previous_model_weight_array.pop()
-                                        loss_array.pop()
-
-                                        iteration = iteration - 1
-
-                                    current_loss_increase_patience = current_loss_increase_patience + 1
-                            else:
-                                break
-                        else:
-                            break
-                    else:
-                        break
-
-                # Use the gradient tape to automatically retrieve
-                # the gradients of the trainable variables with respect to the loss.
-                grads = tape.gradient(current_loss, model.trainable_weights)
-
-                # Run one step of gradient descent by updating
-                # the value of the variables to minimize the loss.
-                optimiser.apply_gradients(zip(grads, model.trainable_weights))
-
-                x_prediction = np.squeeze(model(x_train_iteration, training=False))
-
-                current_accuracy = get_evaluation_score(x_prediction, y_train_iteration)
-
-                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(float(current_loss)), str(current_accuracy)))
+                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(float(loss_array[-1])), str(current_accuracy)))
 
                 if gt is not None:
                     gt_accuracy = get_evaluation_score(x_prediction, gt_prediction)

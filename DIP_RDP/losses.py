@@ -24,7 +24,7 @@ def log_cosh_loss(y_true, y_pred):
     return tf.math.reduce_mean(_log_cosh(y_pred - y_true))
 
 
-def total_variation_loss(_, y_pred):
+def total_variation_loss(y_true, y_pred):
     def _pixel_dif_one_distance(n):
         return 1.0 / tf.cast(n, dtype=tf.float32)
 
@@ -98,7 +98,7 @@ def log_cosh_total_variation_loss(y_true, y_pred):
     return log_cosh_loss(y_true, y_pred) + (0.0 * total_variation_loss(y_true, y_pred))
 
 
-def relative_difference_loss(_, y_pred):
+def relative_difference_loss(y_true, y_pred):
     def _pixel_dif_one_distance(n):
         return 1.0 / tf.cast(n, dtype=tf.float32)
 
@@ -210,7 +210,7 @@ def relative_difference_loss(_, y_pred):
 
 
 def log_cosh_relative_difference_loss(y_true, y_pred):
-    return log_cosh_loss(y_true, y_pred) + (1e01 * relative_difference_loss(y_true, y_pred))
+    return log_cosh_loss(y_true, y_pred) + (0.0 * relative_difference_loss(y_true, y_pred))
 
 
 def correlation_coefficient_loss(y_true, y_pred):

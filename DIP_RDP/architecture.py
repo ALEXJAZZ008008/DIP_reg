@@ -4,7 +4,7 @@
 
 
 import tensorflow as tf
-# import tensorflow_addons as tfa
+import tensorflow_addons as tfa
 import tensorflow.keras as k
 from tqdm import trange
 
@@ -30,27 +30,15 @@ def get_input(input_shape):
 def get_encoder(x, kernel_regularisation, sparseness):
     print("get_encoder")
 
-    layer_layers = [2, 2, 2, 2]
-    layer_depth = [4, 8, 16, 32]
-    layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
-    layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [2, 2, 2, 2]
+    layer_layers = [2, 2, 2, 2, 2]
+    layer_depth = [2, 4, 8, 16, 32]
+    layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
+    layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
+    layer_groups = [1, 2, 2, 2, 2]
 
     unet_connections = []
 
     x = k.layers.GaussianNoise(parameters.gaussian_sigma)(x)
-
-    x = k.layers.Conv3D(filters=layer_depth[0],
-                        kernel_size=(1, 1, 1),
-                        strides=(1, 1, 1),
-                        dilation_rate=(1, 1, 1),
-                        groups=1,
-                        padding="valid",
-                        kernel_initializer="he_normal",
-                        bias_initializer=k.initializers.Constant(0.0))(x)
-    x = k.layers.BatchNormalization()(x)
-    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
-                       shared_axes=[1, 2, 3])(x)
 
     # layer 1
     for i in trange(len(layer_layers)):
@@ -86,10 +74,10 @@ def get_latent(x, kernel_regularisation, sparseness):
                             kernel_initializer="he_normal",
                             bias_initializer=k.initializers.Constant(0.0),
                             name="latent")(x)
+        x = k.layers.Lambda(layers.channel_shuffle, arguments={"groups": layer_groups[i]})(x)
         x = k.layers.BatchNormalization()(x)
         x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
                            shared_axes=[1, 2, 3])(x)
-        x = k.layers.Lambda(layers.channel_shuffle, arguments={"groups": layer_groups[i]})(x)
 
         x = k.layers.GaussianNoise(parameters.gaussian_sigma)(x)
 
@@ -103,11 +91,11 @@ def get_latent(x, kernel_regularisation, sparseness):
 def get_decoder(x, unet_connections, kernel_regularisation, sparseness):
     print("get_decoder")
 
-    layer_layers = [2, 2, 2, 2]
-    layer_depth = [32, 16, 8, 4]
-    layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
-    layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [2, 2, 2, 2]
+    layer_layers = [2, 2, 2, 2, 2]
+    layer_depth = [32, 16, 8, 4, 2]
+    layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
+    layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
+    layer_groups = [2, 2, 2, 2, 1]
 
     for i in trange(len(layer_depth)):
         x = layers.get_transpose_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
@@ -161,14 +149,12 @@ def get_model(input_shape):
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
-    # optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)\
-    #     (weight_decay=0.0, learning_rate=1e-02, clipvalue=1.0) # noqa
-
-    optimiser = tf.optimizers.Nadam(learning_rate=1e-03, clipvalue=1.0)
+    optimiser = tfa.optimizers.Lookahead(tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)
+                                         (weight_decay=1e-03, learning_rate=1e-03, clipvalue=1.0), # noqa
+                                         sync_period=6, slow_step_size=0.5, clipvalue=1.0)
 
     if parameters.relative_difference_bool:
-        # loss = losses.log_cosh_total_variation_loss
-        loss = losses.log_cosh_loss
+        loss = losses.log_cosh_relative_difference_loss
     else:
         loss = losses.log_cosh_loss
 
