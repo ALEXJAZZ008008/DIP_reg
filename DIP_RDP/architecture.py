@@ -6,107 +6,124 @@
 import tensorflow as tf
 import tensorflow_addons as tfa
 import tensorflow.keras as k
-from tqdm import trange
+
 
 import main
-import parameters
-import layers
-import losses
-
 
 if main.reproducible_bool:
     # 4. Set `tensorflow` pseudo-random generator at a fixed value
     tf.random.set_seed(main.seed_value)
 
 
+import parameters
+import layers
+import losses
+
+
 def get_input(input_shape):
     print("get_input")
 
-    input_x = k.layers.Input(input_shape)
+    x = k.layers.Input(input_shape)
 
-    return input_x, input_x
+    return x, x
 
 
-def get_encoder(x, kernel_regularisation, sparseness):
+def get_encoder(x):
     print("get_encoder")
 
     layer_layers = [2, 2, 2, 2, 2]
     layer_depth = [2, 4, 8, 16, 32]
     layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [1, 2, 2, 2, 2]
+    layer_groups = [1, 2, 4, 4, 4]
 
     unet_connections = []
 
-    x = k.layers.GaussianNoise(parameters.gaussian_sigma)(x)
+    x = k.layers.Conv3D(filters=1,
+                        kernel_size=(1, 1, 1),
+                        strides=(1, 1, 1),
+                        dilation_rate=(1, 1, 1),
+                        groups=1,
+                        padding="valid",
+                        kernel_initializer=k.initializers.Constant(1.0),
+                        bias_initializer=k.initializers.Constant(0.0),
+                        trainable=False,
+                        name="input")(x)
 
-    # layer 1
-    for i in trange(len(layer_layers)):
-        for _ in trange(layer_layers[i]):
-            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
-                                             kernel_regularisation, sparseness)
+    x = layers.get_gaussian_noise(x, parameters.input_skip_gaussian_sigma)
 
-        unet_connections.append(k.layers.GaussianNoise(parameters.gaussian_sigma)(x))
+    for i in range(len(layer_layers)):
+        for _ in range(layer_layers[i]):
+            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
-        x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], layer_stride[i], layer_groups[i],
-                                         kernel_regularisation, sparseness)
+        unet_connections.append(layers.get_gaussian_noise(x, parameters.input_skip_gaussian_sigma))
+
+        x1 = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], layer_stride[i], layer_groups[i])
+
+        x2 = layers.get_reflection_padding(x, layer_kernel_size[i])
+        x2 = k.layers.MaxPooling3D(pool_size=layer_kernel_size[i],
+                                   strides=layer_stride[i],
+                                   padding='valid')(x2)
+
+        x = k.layers.Concatenate()([x1, x2])
 
     return x, unet_connections
 
 
-def get_latent(x, kernel_regularisation, sparseness):
+def get_latent(x):
     print("get_latent")
 
     layer_layers = [2]
     layer_depth = [64]
     layer_kernel_size = [(3, 3, 3)]
-    layer_groups = [2]
+    layer_groups = [4]
 
-    # layer 1
-    for i in trange(len(layer_layers)):
-        x = layers.get_reflection_padding(x, layer_kernel_size[i])
+    for i in range(len(layer_layers)):
+        for _ in range(layer_layers[i]):
+            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
+
+        x = layers.get_gaussian_noise(x, parameters.input_skip_gaussian_sigma)
+
         x = k.layers.Conv3D(filters=layer_depth[i],
-                            kernel_size=layer_kernel_size[i],
+                            kernel_size=(1, 1, 1),
                             strides=(1, 1, 1),
                             dilation_rate=(1, 1, 1),
-                            groups=layer_groups[i],
+                            groups=layer_depth[i],
                             padding="valid",
-                            kernel_initializer="he_normal",
+                            kernel_initializer=k.initializers.Constant(1.0),
                             bias_initializer=k.initializers.Constant(0.0),
+                            trainable=False,
                             name="latent")(x)
-        x = k.layers.Lambda(layers.channel_shuffle, arguments={"groups": layer_groups[i]})(x)
-        x = k.layers.BatchNormalization()(x)
-        x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
-                           shared_axes=[1, 2, 3])(x)
 
-        x = k.layers.GaussianNoise(parameters.gaussian_sigma)(x)
-
-        for _ in trange(layer_layers[i] - 1):
-            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
-                                             kernel_regularisation, sparseness)
+        for _ in range(layer_layers[i]):
+            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
     return x
 
 
-def get_decoder(x, unet_connections, kernel_regularisation, sparseness):
+def get_decoder(x, unet_connections):
     print("get_decoder")
 
     layer_layers = [2, 2, 2, 2, 2]
     layer_depth = [32, 16, 8, 4, 2]
     layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [2, 2, 2, 2, 1]
+    layer_groups = [4, 4, 4, 2, 1]
 
-    for i in trange(len(layer_depth)):
-        x = layers.get_transpose_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
-                                                   kernel_regularisation, sparseness)
-        x = k.layers.UpSampling3D(size=layer_stride[i])(x)
+    for i in range(len(layer_depth)):
+        x = layers.get_transpose_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
+
+        x = k.layers.UpSampling3D(size=tuple([x * 2 for x in layer_stride[i]]))(x)
+
+        x = layers.get_reflection_padding(x, layer_kernel_size[i])
+        x = k.layers.AveragePooling3D(pool_size=layer_kernel_size[i],
+                                      strides=layer_stride[i],
+                                      padding='valid')(x)
 
         x = k.layers.Concatenate()([x, unet_connections.pop()])
 
-        for _ in trange(layer_layers[i]):
-            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i],
-                                             kernel_regularisation, sparseness)
+        for _ in range(layer_layers[i]):
+            x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
     # output
     output_kernel_size = (3, 3, 3)
@@ -128,16 +145,13 @@ def get_decoder(x, unet_connections, kernel_regularisation, sparseness):
 def get_tensors(input_shape):
     print("get_tensors")
 
-    kernel_regularisation = 0.0
-    sparseness = 0.0
-
     x, input_x = get_input(input_shape)
 
-    x, unet_connections = get_encoder(x, kernel_regularisation, sparseness)
+    x, unet_connections = get_encoder(x)
 
-    x = get_latent(x, kernel_regularisation, sparseness)
+    x = get_latent(x)
 
-    output_x = get_decoder(x, unet_connections, kernel_regularisation, sparseness)
+    output_x = get_decoder(x, unet_connections)
 
     return input_x, output_x
 
@@ -149,9 +163,11 @@ def get_model(input_shape):
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
-    optimiser = tfa.optimizers.Lookahead(tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)
-                                         (weight_decay=1e-03, learning_rate=1e-03, clipvalue=1.0), # noqa
-                                         sync_period=6, slow_step_size=0.5, clipvalue=1.0)
+    if parameters.weight_decay > 0.0:
+        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)\
+            (weight_decay=parameters.weight_decay, clipvalue=6.0)  # noqa
+    else:
+        optimiser = tf.keras.optimizers.Nadam(clipvalue=6.0)
 
     if parameters.relative_difference_bool:
         loss = losses.log_cosh_relative_difference_loss

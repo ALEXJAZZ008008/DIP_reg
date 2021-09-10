@@ -8,15 +8,16 @@ import numpy as np
 import scipy.stats
 import scipy.ndimage
 from sklearn.preprocessing import StandardScaler, PowerTransformer, RobustScaler
-from tqdm import trange
+
 
 import main
-import parameters
-
 
 if main.reproducible_bool:
     # 3. Set `numpy` pseudo-random generator at a fixed value
     np.random.seed(main.seed_value)
+
+
+import parameters
 
 
 def get_next_geometric_value(an, a0):
@@ -33,7 +34,7 @@ def get_next_geometric_value(an, a0):
 def data_upsample(data, data_type, new_resolution=None):
     print("data_upsample")
 
-    for i in trange(len(data)):
+    for i in range(len(data)):
         if data_type == "path":
             data_copy = np.load(data[i])
         else:
@@ -54,24 +55,22 @@ def data_upsample(data, data_type, new_resolution=None):
         else:
             data_copy_shape = list(data_copy.shape)
 
-            for j in trange(len(data_copy_shape)):
+            for j in range(len(data_copy_shape)):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
-            geometric_sequence_a0 = 2
-
             dimension_x_upscale_factor = \
-                get_next_geometric_value(data_copy_shape[1], geometric_sequence_a0) / data_copy.shape[1]
+                get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of) / data_copy.shape[1]
             dimension_y_upscale_factor = \
-                get_next_geometric_value(data_copy_shape[2], geometric_sequence_a0) / data_copy.shape[2]
+                get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of) / data_copy.shape[2]
             dimension_z_upscale_factor = \
-                get_next_geometric_value(data_copy_shape[3], geometric_sequence_a0) / data_copy.shape[3]
+                get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of) / data_copy.shape[3]
 
         if not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
                 not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
                 not np.isclose(dimension_z_upscale_factor, 1.0, rtol=0.0, atol=1e-05):
             data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_upscale_factor, dimension_y_upscale_factor,
-                                                       dimension_z_upscale_factor), order=2, mode="mirror",
+                                                       dimension_z_upscale_factor), order=1, mode="mirror",
                                            prefilter=True)
 
         data_copy = np.expand_dims(data_copy, -1)
@@ -98,7 +97,9 @@ def yeo_johnson_inverse_transform(power_transformer, x):
             else:  # lmbda != 0
                 _x_inv[pos] = np.power((_x[pos] * _lmbda) + 1.0, 1.0 / _lmbda) - 1.0
 
-            _x_inv[pos] = np.nan_to_num(_x_inv[pos], copy=False, nan=float(np.nanmax(_x_inv[pos])))
+            x_inv_pos_max = float(np.nanmax(_x_inv[pos]))
+            _x_inv[pos] = np.nan_to_num(_x_inv[pos], copy=False, nan=x_inv_pos_max, posinf=x_inv_pos_max,
+                                        neginf=float(np.nanmin(_x_inv[pos])))
 
         if np.count_nonzero(~pos) > 0:
             # when x < 0
@@ -107,7 +108,9 @@ def yeo_johnson_inverse_transform(power_transformer, x):
             else:  # lmbda == 2
                 _x_inv[~pos] = 1.0 - np.exp(-_x[~pos])
 
-            _x_inv[~pos] = np.nan_to_num(_x_inv[~pos], copy=False, nan=float(np.nanmin(_x_inv[~pos])))
+            x_inv_not_pos_min = float(np.nanmin(_x_inv[~pos]))
+            _x_inv[~pos] = np.nan_to_num(_x_inv[~pos], copy=False, nan=x_inv_not_pos_min,
+                                         posinf=float(np.nanmax(_x_inv[~pos])), neginf=x_inv_not_pos_min)
 
         return _x_inv
 
@@ -125,10 +128,10 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
     if preprocessing_steps is None:
         preprocessing_steps = []
 
-        for _ in trange(len(data)):
+        for _ in range(len(data)):
             preprocessing_steps.append(None)
 
-    for i in trange(len(data)):
+    for i in range(len(data)):
         if data_type == "path":
             data_copy = np.load(data[i])
         else:
@@ -174,7 +177,7 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
 def redistribute(data, data_type, robust_bool=False, new_distribution=None, new_distribution_type=None):
     print("redistribute")
 
-    for i in trange(len(data)):
+    for i in range(len(data)):
         if data_type == "path":
             data_copy = np.load(data[i])
         else:

@@ -7,6 +7,14 @@ import tensorflow as tf
 import tensorflow.keras as k
 
 
+import main
+
+
+if main.reproducible_bool:
+    # 4. Set `tensorflow` pseudo-random generator at a fixed value
+    tf.random.set_seed(main.seed_value)
+
+
 # https://github.com/keras-team/keras/blob/master/keras/losses.py#L256-L310
 def mean_squared_error_loss(y_true, y_pred):
     y_true = tf.cast(y_true, dtype=tf.float64)

@@ -21,20 +21,3 @@ def get_convolution_layer(x, depth, size, stride, groups):
     x = k.layers.ReLU(negative_slope=0.2)(x)
 
     return x
-
-
-def get_transpose_convolution_layer(x, depth, size, stride, groups):
-    print("get_transpose_convolution_layer")
-
-    x = k.layers.Conv3DTranspose(filters=depth,
-                                 kernel_size=size,
-                                 strides=stride,
-                                 dilation_rate=(1, 1, 1),
-                                 groups=groups,
-                                 padding="same",
-                                 kernel_initializer="he_normal",
-                                 bias_initializer=k.initializers.Constant(0.0))(x)
-    x = k.layers.BatchNormalization()(x)
-    x = k.layers.ReLU(negative_slope=0.2)(x)
-
-    return x

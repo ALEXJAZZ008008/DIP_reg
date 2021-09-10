@@ -3,12 +3,20 @@
 # For internal research only.
 
 
+import tensorflow as tf
 import tensorflow.keras as k
 from tqdm import trange
 
+
+import main
+import parameters
 import layers
 import losses
-import parameters
+
+
+if main.reproducible_bool:
+    # 4. Set `tensorflow` pseudo-random generator at a fixed value
+    tf.random.set_seed(main.seed_value)
 
 
 def get_input(input_shape):
@@ -30,7 +38,6 @@ def get_encoder(x):
 
     res_connections = []
 
-    # layer 1
     for i in trange(len(layer_layers)):
         for _ in trange(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
@@ -50,7 +57,6 @@ def get_latent(x):
     layer_kernel_size = [(3, 3, 3)]
     layer_groups = [1]
 
-    # layer 1
     for i in trange(len(layer_layers)):
         for _ in trange(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])

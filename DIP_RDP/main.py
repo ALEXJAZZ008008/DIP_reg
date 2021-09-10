@@ -6,6 +6,7 @@
 import os
 import re
 import shutil
+import math
 import random
 import numpy as np
 import scipy.constants
@@ -16,9 +17,7 @@ import tensorflow.keras as k
 import pickle
 import matplotlib.pyplot as plt
 import nibabel as nib
-from tqdm import trange
 
-import losses
 
 reproducible_bool = True
 
@@ -59,7 +58,6 @@ else:
     k.mixed_precision.set_global_policy(policy)
 
 
-import transcript
 import parameters
 import preprocessing
 import architecture
@@ -108,7 +106,7 @@ def get_data_windows(data):
 
             current_data = []
 
-            for i in trange(number_of_windows):
+            for i in range(number_of_windows):
                 current_overlap_index = overlap_index * i
 
                 current_data.append(
@@ -160,7 +158,7 @@ def get_train_data():
     current_shape = None
     gaussian_noise = None
 
-    for i in trange(len(y_files)):
+    for i in range(len(y_files)):
         current_volume = nib.load(y_files[i])
         current_array = current_volume.get_data()
 
@@ -176,20 +174,28 @@ def get_train_data():
         np.save(current_y_train_path, current_array)
         y.append(current_y_train_path)
 
-        if gaussian_noise is None:
-            gaussian_noise = preprocessing.redistribute([np.random.normal(size=current_array.shape)], "numpy")[0]
+        if parameters.data_input_bool:
+            if parameters.data_gaussian_smooth_sigma_xy > 0.0 or parameters.data_gaussian_smooth_sigma_z > 0.0:
+                current_array = scipy.ndimage.gaussian_filter(current_array,
+                                                              sigma=(0.0,
+                                                                     parameters.data_gaussian_smooth_sigma_xy,
+                                                                     parameters.data_gaussian_smooth_sigma_xy,
+                                                                     parameters.data_gaussian_smooth_sigma_z),
+                                                              mode="mirror")
 
-        for j in trange(current_array.shape[2]):
-            current_array[:, :, j] = scipy.ndimage.gaussian_filter(current_array[:, :, j], sigma=2.5, mode="mirror")
+                current_array = preprocessing.redistribute([current_array], "numpy")[0]
+        else:
+            current_array = np.zeros(current_array.shape)
 
-        for j in trange(current_array.shape[0]):
-            for l in trange(current_array.shape[1]):
-                current_array[j, l, :] = scipy.ndimage.gaussian_filter(current_array[j, l, :], sigma=0.5, mode="mirror")
+        if parameters.input_gaussian_weight > 0.0:
+            if parameters.data_input_bool:
+                current_array, _ = preprocessing.data_preprocessing(current_array, "numpy")
 
-        current_array = preprocessing.redistribute([current_array], "numpy")[0]
+            if gaussian_noise is None:
+                gaussian_noise = preprocessing.redistribute([np.random.normal(size=current_array.shape)], "numpy")[0]
 
-        gaussian_weight = parameters.gaussian_sigma
-        current_array = (current_array + (gaussian_weight * gaussian_noise)) / (1.0 + gaussian_weight)
+            current_array = (current_array + (parameters.input_gaussian_weight * gaussian_noise)) / \
+                            (1.0 + parameters.input_gaussian_weight)
 
         current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
         np.save(current_x_train_path, current_array)
@@ -211,7 +217,7 @@ def get_train_data():
         if not os.path.exists(gt_train_output_path):
             os.makedirs(gt_train_output_path, mode=0o770)
 
-        for i in trange(len(gt_files)):
+        for i in range(len(gt_files)):
             current_array = nib.load(gt_files[i]).get_data()
 
             current_array, _ = get_data_windows(current_array)
@@ -291,58 +297,115 @@ def get_model_memory_usage(batch_size, model):
     return gbytes
 
 
-def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_array, previous_model_weight_array,
-               relative_plateau_cutoff, model_output_path, iteration):
+def get_bayesian_train_prediction(model, x_train_iteration, previous_x_prediction_list):
+    x_prediction = model(x_train_iteration, training=True)
+
+    previous_x_prediction_list.append(tf.cast(x_prediction, dtype=tf.float32))
+
+    x_prediction_uncertainty = tf.math.reduce_mean(tf.math.reduce_variance(previous_x_prediction_list, axis=0))
+
+    return x_prediction, x_prediction_uncertainty, previous_x_prediction_list
+
+
+def train_backup(model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list,
+                 previous_optimiser_weight_list, current_loss_increase_patience):
+    print("train_backup")
+
+    print("WARNING: Loss increased above threshold or has become NaN; backing up...")
+
+    if len(loss_list) > 1:
+        loss_list.pop()
+        previous_x_prediction_list.pop()
+        previous_model_weight_list.pop()
+        previous_optimiser_weight_list.pop()
+
+    model.set_weights(pickle.load(open(previous_model_weight_list[-1], "rb")))
+
+    if len(previous_optimiser_weight_list) > 1:
+        optimiser.set_weights(pickle.load(open(previous_optimiser_weight_list[-1], "rb")))
+
+    current_loss_increase_patience = current_loss_increase_patience + 1
+
+    if len(loss_list) > 0:
+        loss_list.pop()
+        previous_model_weight_list.pop()
+        previous_optimiser_weight_list.pop()
+
+        if len(previous_x_prediction_list) > 0:
+            previous_x_prediction_list.pop()
+
+    return model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list,\
+           previous_optimiser_weight_list, current_loss_increase_patience
+
+
+def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list, previous_x_prediction_list,
+               previous_model_weight_list, previous_optimiser_weight_list, relative_plateau_cutoff,
+               model_output_path):
     current_loss_increase_patience = 0
 
     while True:
-        previous_model_weight_array.append("{0}/{1}.pkl".format(model_output_path, str(iteration)))
-        pickle.dump(model.get_weights(), open(previous_model_weight_array[-1], "wb"))
+        previous_model_weight_list.append("{0}/model_{1}.pkl".format(model_output_path, str(len(loss_list))))
+        pickle.dump(model.get_weights(), open(previous_model_weight_list[-1], "wb"))
+
+        previous_optimiser_weight_list.append("{0}/optimiser_{1}.pkl".format(model_output_path, str(len(loss_list))))
+        pickle.dump(optimiser.get_weights(), open(previous_optimiser_weight_list[-1], "wb"))
 
         # Open a GradientTape to record the operations run
         # during the forward pass, which enables auto-differentiation.
         with tf.GradientTape() as tape:
+            tape.reset()
 
             # Run the forward pass of the layer.
             # The operations that the layer applies
             # to its inputs are going to be recorded
             # on the GradientTape.
-            logits = model(x_train_iteration, training=True)  # Logits for this minibatch
+            logits, uncertainty, previous_x_prediction_list = \
+                get_bayesian_train_prediction(model, x_train_iteration, previous_x_prediction_list)  # Logits for this minibatch
 
             # Compute the loss value for this minibatch.
-            current_loss = loss(y_train_iteration, logits)
-            current_loss = current_loss + np.mean(model.losses[::3])
-            current_loss = current_loss + np.mean([model.losses[1::3], model.losses[2::3]])
+            current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
+                                               parameters.uncertainty_weight * uncertainty,
+                                               tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[::3]),
+                                                                            tf.zeros_like(model.losses[::3]),
+                                                                            model.losses[::3])),
+                                               tf.math.reduce_mean([
+                                                   tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[1::3]),
+                                                                                tf.zeros_like(model.losses[1::3]),
+                                                                                model.losses[1::3])),
+                                                   tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[2::3]),
+                                                                                tf.zeros_like(model.losses[2::3]),
+                                                                                model.losses[2::3]))
+                                               ])])
 
-        loss_array.append(current_loss)
+        loss_list.append(current_loss)
+
+        if math.isnan(loss_list[-1]) or math.isinf(loss_list[-1]):
+            model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list, \
+            previous_optimiser_weight_list, current_loss_increase_patience = \
+                train_backup(model, optimiser, loss_list, previous_x_prediction_list,
+                             previous_model_weight_list, previous_optimiser_weight_list,
+                             current_loss_increase_patience)
+
+            continue
 
         if relative_plateau_cutoff is None:
-            relative_plateau_cutoff = parameters.plateau_cutoff * current_loss
+            relative_plateau_cutoff = parameters.plateau_cutoff * loss_list[-1]
 
-        if len(loss_array) > 1:
-            loss_gradient = np.gradient(loss_array)[-1]
+        if len(loss_list) > 1:
+            loss_gradient = np.gradient(loss_list)[-1]
 
             if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
-                if current_loss > loss_array[-1]:
+                if not (loss_list[-1] * (parameters.backtracking_weight_percentage / 100.0) < loss_list[-2]):
                     if current_loss_increase_patience >= parameters.patience:
-                        print("WARNING Loss increased; patience reached, allowing anyway!")
+                        print("WARNING: Loss increased above threshold; patience reached, allowing anyway!")
 
                         break
                     else:
-                        print("WARNING Loss increased; backing up...")
-
-                        model.set_weights(pickle.load(open(previous_model_weight_array[-1], "rb")))
-
-                        previous_model_weight_array.pop()
-                        loss_array.pop()
-
-                        if current_loss_increase_patience > 1:
-                            previous_model_weight_array.pop()
-                            loss_array.pop()
-
-                            iteration = iteration - 1
-
-                        current_loss_increase_patience = current_loss_increase_patience + 1
+                        model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list,\
+                        previous_optimiser_weight_list, current_loss_increase_patience = \
+                            train_backup(model, optimiser, loss_list, previous_x_prediction_list,
+                                         previous_model_weight_list, previous_optimiser_weight_list,
+                                         current_loss_increase_patience)
                 else:
                     break
             else:
@@ -352,21 +415,41 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
     # Use the gradient tape to automatically retrieve
     # the gradients of the trainable variables with respect to the loss.
-    grads = tape.gradient(current_loss, model.trainable_weights)
+    grads = tape.gradient(loss_list[-1], model.trainable_weights)
 
     # Run one step of gradient descent by updating
     # the value of the variables to minimize the loss.
     optimiser.apply_gradients(zip(grads, model.trainable_weights))
 
-    return model, loss_array, previous_model_weight_array, relative_plateau_cutoff, iteration
+    return model, loss_list, uncertainty, previous_x_prediction_list, previous_model_weight_list,\
+           previous_optimiser_weight_list, relative_plateau_cutoff
+
+
+def get_bayesian_test_prediction(model, x_train_iteration):
+    print("get_bayesian_test_prediction")
+
+    x_prediction_list = []
+
+    for i in range(parameters.bayesian_test_iterations):
+        x_prediction_list.append(model(x_train_iteration, training=False))
+
+    x_prediction = tf.math.reduce_mean(x_prediction_list, axis=0)
+
+    x_prediction_uncertainty = tf.math.reduce_mean(tf.math.reduce_variance(x_prediction_list, axis=0))
+
+    return x_prediction, x_prediction_uncertainty
 
 
 def test_step(model, x_train_iteration, y_train_iteration):
-    x_prediction = np.squeeze(model(x_train_iteration, training=False))
+    print("test_step")
+
+    x_prediction, x_prediction_uncertainty = \
+        get_bayesian_test_prediction(model, x_train_iteration)
+    x_prediction = np.squeeze(x_prediction)
 
     current_accuracy = get_evaluation_score(x_prediction, y_train_iteration)
 
-    return x_prediction, current_accuracy
+    return x_prediction, x_prediction_uncertainty, current_accuracy
 
 
 def get_evaluation_score(prediction, gt):
@@ -375,7 +458,8 @@ def get_evaluation_score(prediction, gt):
     if float_sixteen_bool:
         prediction = prediction.astype(np.float32)
 
-    accuracy = np.corrcoef(np.ravel(np.squeeze(gt)), np.ravel(np.squeeze(prediction)))[0, 1]
+    accuracy = np.ma.corrcoef(np.ma.masked_invalid(np.ravel(np.squeeze(gt))),
+                              np.ma.masked_invalid(np.ravel(np.squeeze(prediction))))[0, 1]
 
     return accuracy
 
@@ -414,7 +498,7 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
 
         output_arrays = []
 
-        for l in trange(number_of_windows):
+        for l in range(number_of_windows):
             current_overlap_index = overlap_index * l
 
             current_output_array = np.zeros((full_input_shape[0], full_input_shape[1], windowed_full_input_axial_size))
@@ -457,7 +541,7 @@ def train_model():
     k.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
                        show_layer_names=True, expand_nested=True)
 
-    for i in trange(len(y)):
+    for i in range(len(y)):
         print("Patient/Time point:\t{0}".format(str(i)))
 
         patient_output_path = "{0}/{1}".format(output_path, str(i))
@@ -470,7 +554,7 @@ def train_model():
 
         current_window_data_paths = []
 
-        for j in trange(number_of_windows):
+        for j in range(number_of_windows):
             print("Window:\t{0}".format(str(j)))
 
             window_output_path = "{0}/{1}".format(patient_output_path, str(j))
@@ -506,26 +590,48 @@ def train_model():
             else:
                 gt_prediction = None
 
-            iteration = 0
-            loss_array = []
+            total_iterations = 0
+
+            loss_list = []
+            previous_x_prediction_list = []
+            previous_model_weight_list = []
+            previous_optimiser_weight_list = []
+
             relative_plateau_cutoff = None
-            previous_model_weight_array = []
+
+            gt_accuracy = None
+            max_accuracy = 0.0
+            max_accuracy_iteration = 0
 
             while True:
-                print("Iteration:\t{0}".format(str(iteration)))
+                print("Iteration:\t{0:<20}\tTotal iterations:\t{1:<20}".format(str(len(loss_list)), str(total_iterations)))
 
-                model, loss_array, previous_model_weight_array, relative_plateau_cutoff, iteration = \
-                    train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_array,
-                               previous_model_weight_array, relative_plateau_cutoff, model_output_path, iteration)
+                model, loss_list, uncertainty, previous_x_prediction_list, previous_model_weight_list,\
+                previous_optimiser_weight_list, relative_plateau_cutoff = \
+                    train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list,
+                               previous_x_prediction_list, previous_model_weight_list, previous_optimiser_weight_list,
+                               relative_plateau_cutoff, model_output_path)
 
-                x_prediction, current_accuracy = test_step(model, x_train_iteration, y_train_iteration)
+                if len(previous_x_prediction_list) > parameters.bayesian_test_iterations - 1:
+                    previous_x_prediction_list.pop(0)
 
-                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(float(loss_array[-1])), str(current_accuracy)))
+                x_prediction, x_prediction_uncertainty, current_accuracy = \
+                    test_step(model, x_train_iteration, y_train_iteration)
+
+                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}\tUncertainty:\t{2:<20}".format(str(loss_list[-1].numpy()), str(current_accuracy), str(uncertainty.numpy())))
 
                 if gt is not None:
                     gt_accuracy = get_evaluation_score(x_prediction, gt_prediction)
 
-                    print("GT accuracy:\t{0}".format(str(gt_accuracy)))
+                    if max_accuracy < gt_accuracy:
+                        max_accuracy = gt_accuracy
+                        max_accuracy_iteration = len(loss_list)
+
+                    print("GT accuracy:\t{0:<20}\tGT uncertainty:\t{1:<20}".format(str(gt_accuracy), str(x_prediction_uncertainty.numpy())))
+                else:
+                    if max_accuracy < current_accuracy:
+                        max_accuracy = current_accuracy
+                        max_accuracy_iteration = len(loss_list)
 
                 x_prediction = np.squeeze(x_prediction).astype(np.float64)
                 y_plot = np.squeeze(y_train_iteration).astype(np.float64)
@@ -553,36 +659,52 @@ def train_model():
                     plt.imshow(gt_plot[:, :, int(gt_plot.shape[2] / 2)], cmap="Greys")
 
                 plt.tight_layout()
-                plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)), format="png", dpi=600,
+                plt.savefig("{0}/{1}.png".format(plot_output_path, str(len(loss_list))), format="png", dpi=600,
                             bbox_inches="tight")
                 plt.close()
 
                 plot_files = os.listdir(plot_output_path)
 
-                for l in trange(len(plot_files)):
+                for l in range(len(plot_files)):
                     current_plot_file = plot_files[l].strip()
 
                     split_array = current_plot_file.split(".png")
 
                     if len(split_array) >= 2:
-                        if int(split_array[0]) > iteration:
+                        if int(split_array[0]) > len(loss_list):
                             os.remove("{0}/{1}".format(plot_output_path, current_plot_file))
 
-                if parameters.relative_difference_bool:
-                    if len(loss_array) >= parameters.patience:
-                        loss_gradient = np.gradient(loss_array)[-parameters.patience:]
+                model_files = os.listdir(model_output_path)
 
-                        if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
-                            print("Reached plateau: Exiting...")
+                for l in range(len(model_files)):
+                    current_plot_file = model_files[l].strip()
 
-                            break
-                else:
-                    if iteration >= parameters.vanilla_max_iteration:
-                        print("Reached Iteration {0}: Exiting...".format(parameters.vanilla_max_iteration))
+                    split_array = current_plot_file.split("model_")[-1]
+                    split_array = split_array.split("optimiser_")[-1]
+
+                    split_array = split_array.split(".pkl")
+
+                    if len(split_array) >= 2:
+                        if int(split_array[0]) > len(loss_list):
+                            os.remove("{0}/{1}".format(model_output_path, current_plot_file))
+
+                if len(loss_list) >= parameters.patience:
+                    loss_gradient = np.gradient(loss_list)[-parameters.patience:]
+
+                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
+                        print("Reached plateau: Exiting...")
+                        print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy), str(max_accuracy_iteration)))
+
+                        if gt is not None:
+                            accuracy_loss = np.abs(gt_accuracy - max_accuracy)
+                        else:
+                            accuracy_loss = np.abs(current_accuracy - max_accuracy)
+
+                        print("Accuracy loss:\t{0:<20}".format(str(accuracy_loss)))
 
                         break
 
-                iteration = iteration + 1
+                total_iterations = total_iterations + 1
 
             current_window_data_paths.append(output_window_predictions(x_prediction, y_train_iteration,
                                                                        preprocessing_steps, window_input_shape,
@@ -609,9 +731,13 @@ def main():
     if os.path.exists(logfile_path):
         os.remove(logfile_path)
 
+    import transcript
     transcript.start(logfile_path)
 
     train_model()
+
+    import python_email_notification
+    python_email_notification.main()
 
     transcript.stop()
 

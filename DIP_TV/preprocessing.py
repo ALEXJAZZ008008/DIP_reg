@@ -10,7 +10,13 @@ import scipy.ndimage
 from sklearn.preprocessing import StandardScaler
 from tqdm import trange
 
+import main
 import parameters
+
+
+if main.reproducible_bool:
+    # 3. Set `numpy` pseudo-random generator at a fixed value
+    np.random.seed(main.seed_value)
 
 
 def get_next_geometric_value(an, a0):
