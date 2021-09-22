@@ -23,7 +23,7 @@ layer_gaussian_sigma = 0.0
 bayesian_bool = False
 bayesian_test_iterations = 1
 
-dropout = 1.0 / 64.0
+dropout = 0.0
 uncertainty_weight = 0.0
 
 
