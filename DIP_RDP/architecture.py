@@ -3,6 +3,7 @@
 # For internal research only.
 
 
+import gc
 import tensorflow as tf
 import tensorflow_addons as tfa
 import tensorflow.keras as k
@@ -172,6 +173,12 @@ def get_model(input_shape):
     if parameters.relative_difference_bool:
         loss = losses.log_cosh_relative_difference_loss
     else:
-        loss = losses.log_cosh_loss
+        if parameters.total_variation_bool:
+            loss = losses.log_cosh_total_variation_loss
+        else:
+            loss = losses.log_cosh_loss
+
+    gc.collect()
+    k.backend.clear_session()
 
     return model, optimiser, loss

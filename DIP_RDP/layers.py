@@ -150,15 +150,6 @@ class ActivityRegularization(k.layers.Layer):
         return dict(list(base_config.items()))
 
 
-def get_gaussian(x):
-    print("get_gaussian")
-
-    if parameters.layer_gaussian_sigma > 0.0:
-        x = k.layers.GaussianNoise(rate=parameters.layer_gaussian_sigma)(x)
-
-    return x
-
-
 def get_dropout(x):
     print("get_dropout")
 
@@ -192,7 +183,7 @@ def get_convolution_layer(x, depth, size, stride, groups):
                         kernel_regularizer=losses.l2_regulariser)(x)
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)
-    x = get_gaussian(x)
+    x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
     x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
                        alpha_regularizer=losses.log_cosh_regulariser,
                        shared_axes=[1, 2, 3])(x)
@@ -216,7 +207,7 @@ def get_transpose_convolution_layer(x, depth, size, stride, groups):
                                         kernel_regularizer=losses.l2_regulariser)(x)
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)
-    x = get_gaussian(x)
+    x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
     x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.3),
                        alpha_regularizer=losses.log_cosh_regulariser,
                        shared_axes=[1, 2, 3])(x)

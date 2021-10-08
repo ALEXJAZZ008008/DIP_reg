@@ -3,6 +3,7 @@
 # For internal research only.
 
 
+import gc
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ import pickle
 import matplotlib.pyplot as plt
 import nibabel as nib
 
+import losses
 
 reproducible_bool = True
 
@@ -25,8 +27,8 @@ if reproducible_bool:
     # Seed value (can actually be different for each attribution step)
     seed_value = 0
 
-    # 1. Set `PYTHONHASHSEED` environment variable at a fixed value
-    os.environ['PYTHONHASHSEED'] = str(seed_value)
+    # 1. Set "PYTHONHASHSEED" environment variable at a fixed value
+    os.environ["PYTHONHASHSEED"] = str(seed_value)
 
     # 2. Set `python` built-in pseudo-random generator at a fixed value
     random.seed(seed_value)
@@ -44,6 +46,14 @@ if reproducible_bool:
     # tf.compat.v1.keras.backend.set_session(sess)
 else:
     random.seed()
+
+physical_devices = tf.config.list_physical_devices("GPU")
+
+try:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+except:
+    # Invalid device or cannot modify virtual devices once initialized.
+    pass
 
 float_sixteen_bool = True  # set the network to use float16 data
 cpu_bool = False  # if using CPU, set to true: disables mixed precision computation
@@ -162,10 +172,14 @@ def get_train_data():
         current_volume = nib.load(y_files[i])
         current_array = current_volume.get_data()
 
-        if full_current_shape is None:
-            full_current_shape = current_array.shape
+        if parameters.data_window_bool:
+            if full_current_shape is None:
+                full_current_shape = current_array.shape
 
         current_array, windowed_full_input_axial_size = get_data_windows(current_array)
+
+        if full_current_shape is None:
+            full_current_shape = current_array.shape[1:]
 
         if current_shape is None:
             current_shape = current_array[0].shape
@@ -297,25 +311,30 @@ def get_model_memory_usage(batch_size, model):
     return gbytes
 
 
-def get_bayesian_train_prediction(model, x_train_iteration, previous_x_prediction_list):
-    x_prediction = model(x_train_iteration, training=True)
+def get_bayesian_train_prediction(model, x_train_iteration):
+    x_prediction_1 = model(x_train_iteration, training=True)
 
-    previous_x_prediction_list.append(tf.cast(x_prediction, dtype=tf.float32))
+    x_prediction = tf.math.reduce_mean([x_prediction_1], axis=0)
 
-    x_prediction_uncertainty = tf.math.reduce_mean(tf.math.reduce_variance(previous_x_prediction_list, axis=0))
+    x_prediction_uncertainty = tf.cast(tf.math.reduce_mean(tf.math.reduce_std([x_prediction_1], axis=0)),
+                                       dtype=tf.float32)
 
-    return x_prediction, x_prediction_uncertainty, previous_x_prediction_list
+    gc.collect()
+    k.backend.clear_session()
+
+    return x_prediction, x_prediction_uncertainty
 
 
-def train_backup(model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list,
-                 previous_optimiser_weight_list, current_loss_increase_patience):
+def train_backup(model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list,
+                 current_loss_increase_patience):
     print("train_backup")
 
     print("WARNING: Loss increased above threshold or has become NaN; backing up...")
 
+    tape = None
+
     if len(loss_list) > 1:
         loss_list.pop()
-        previous_x_prediction_list.pop()
         previous_model_weight_list.pop()
         previous_optimiser_weight_list.pop()
 
@@ -331,23 +350,19 @@ def train_backup(model, optimiser, loss_list, previous_x_prediction_list, previo
         previous_model_weight_list.pop()
         previous_optimiser_weight_list.pop()
 
-        if len(previous_x_prediction_list) > 0:
-            previous_x_prediction_list.pop()
-
-    return model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list,\
-           previous_optimiser_weight_list, current_loss_increase_patience
+    return tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
+           current_loss_increase_patience
 
 
-def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list, previous_x_prediction_list,
-               previous_model_weight_list, previous_optimiser_weight_list, relative_plateau_cutoff,
-               model_output_path):
+def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list, previous_model_weight_list,
+               previous_optimiser_weight_list, relative_plateau_cutoff, model_output_path):
     current_loss_increase_patience = 0
 
     while True:
-        previous_model_weight_list.append("{0}/model_{1}.pkl".format(model_output_path, str(len(loss_list))))
+        previous_model_weight_list.append("{0}/model_{1}.pkl".format(model_output_path, str(len(previous_model_weight_list))))
         pickle.dump(model.get_weights(), open(previous_model_weight_list[-1], "wb"))
 
-        previous_optimiser_weight_list.append("{0}/optimiser_{1}.pkl".format(model_output_path, str(len(loss_list))))
+        previous_optimiser_weight_list.append("{0}/optimiser_{1}.pkl".format(model_output_path, str(len(previous_optimiser_weight_list))))
         pickle.dump(optimiser.get_weights(), open(previous_optimiser_weight_list[-1], "wb"))
 
         # Open a GradientTape to record the operations run
@@ -359,8 +374,7 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
             # The operations that the layer applies
             # to its inputs are going to be recorded
             # on the GradientTape.
-            logits, uncertainty, previous_x_prediction_list = \
-                get_bayesian_train_prediction(model, x_train_iteration, previous_x_prediction_list)  # Logits for this minibatch
+            logits, uncertainty = get_bayesian_train_prediction(model, x_train_iteration)  # Logits for this minibatch
 
             # Compute the loss value for this minibatch.
             current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
@@ -374,22 +388,17 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
                                                                                 model.losses[1::3])),
                                                    tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[2::3]),
                                                                                 tf.zeros_like(model.losses[2::3]),
-                                                                                model.losses[2::3]))
-                                               ])])
+                                                                                model.losses[2::3]))])])
 
         loss_list.append(current_loss)
 
         if math.isnan(loss_list[-1]) or math.isinf(loss_list[-1]):
-            model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list, \
-            previous_optimiser_weight_list, current_loss_increase_patience = \
-                train_backup(model, optimiser, loss_list, previous_x_prediction_list,
-                             previous_model_weight_list, previous_optimiser_weight_list,
-                             current_loss_increase_patience)
+            tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
+            current_loss_increase_patience = train_backup(model, optimiser, loss_list, previous_model_weight_list,
+                                                          previous_optimiser_weight_list,
+                                                          current_loss_increase_patience)
 
             continue
-
-        if relative_plateau_cutoff is None:
-            relative_plateau_cutoff = parameters.plateau_cutoff * loss_list[-1]
 
         if len(loss_list) > 1:
             loss_gradient = np.gradient(loss_list)[-1]
@@ -401,11 +410,11 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
                         break
                     else:
-                        model, optimiser, loss_list, previous_x_prediction_list, previous_model_weight_list,\
-                        previous_optimiser_weight_list, current_loss_increase_patience = \
-                            train_backup(model, optimiser, loss_list, previous_x_prediction_list,
-                                         previous_model_weight_list, previous_optimiser_weight_list,
-                                         current_loss_increase_patience)
+                        tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
+                        current_loss_increase_patience = train_backup(model, optimiser, loss_list,
+                                                                      previous_model_weight_list,
+                                                                      previous_optimiser_weight_list,
+                                                                      current_loss_increase_patience)
                 else:
                     break
             else:
@@ -417,12 +426,13 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
     # the gradients of the trainable variables with respect to the loss.
     grads = tape.gradient(loss_list[-1], model.trainable_weights)
 
+    del tape
+
     # Run one step of gradient descent by updating
     # the value of the variables to minimize the loss.
     optimiser.apply_gradients(zip(grads, model.trainable_weights))
 
-    return model, loss_list, uncertainty, previous_x_prediction_list, previous_model_weight_list,\
-           previous_optimiser_weight_list, relative_plateau_cutoff
+    return model, loss_list, uncertainty, previous_model_weight_list, previous_optimiser_weight_list
 
 
 def get_bayesian_test_prediction(model, x_train_iteration):
@@ -435,57 +445,55 @@ def get_bayesian_test_prediction(model, x_train_iteration):
 
     x_prediction = tf.math.reduce_mean(x_prediction_list, axis=0)
 
-    x_prediction_uncertainty = tf.math.reduce_mean(tf.math.reduce_variance(x_prediction_list, axis=0))
+    x_prediction_uncertainty_volume = tf.math.reduce_std(x_prediction_list, axis=0)
+    x_prediction_uncertainty = tf.math.reduce_mean(x_prediction_uncertainty_volume)
 
-    return x_prediction, x_prediction_uncertainty
+    gc.collect()
+    k.backend.clear_session()
+
+    return x_prediction, x_prediction_uncertainty, x_prediction_uncertainty_volume
 
 
-def test_step(model, x_train_iteration, y_train_iteration):
+def test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss_list):
     print("test_step")
 
-    x_prediction, x_prediction_uncertainty = \
+    x_prediction, x_prediction_uncertainty, x_prediction_uncertainty_volume = \
         get_bayesian_test_prediction(model, x_train_iteration)
-    x_prediction = np.squeeze(x_prediction)
 
-    current_accuracy = get_evaluation_score(x_prediction, y_train_iteration)
+    evaluation_loss_list.append(loss(y_train_iteration, x_prediction))
 
-    return x_prediction, x_prediction_uncertainty, current_accuracy
+    current_accuracy = losses.correlation_coefficient_accuracy(y_train_iteration, x_prediction)
 
-
-def get_evaluation_score(prediction, gt):
-    print("get_evaluation_score")
-
-    if float_sixteen_bool:
-        prediction = prediction.astype(np.float32)
-
-    accuracy = np.ma.corrcoef(np.ma.masked_invalid(np.ravel(np.squeeze(gt))),
-                              np.ma.masked_invalid(np.ravel(np.squeeze(prediction))))[0, 1]
-
-    return accuracy
+    return x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
+           current_accuracy
 
 
-def output_window_predictions(x_prediction, y_train_iteration, preprocessing_steps, window_input_shape,
-                              current_output_path, j):
+def output_window_predictions(x_prediction, y_train_iteration, x_prediction_uncertainty_volume, preprocessing_steps,
+                              window_input_shape, current_output_path, j):
     print("output_window_predictions")
-
-    x_prediction = x_prediction.astype(np.float64)
-    y_train_iteration = y_train_iteration.astype(np.float64)
 
     x_prediction = preprocessing.redistribute([x_prediction], "numpy", True, [y_train_iteration], "numpy")[0]
     x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps)[0][0]
 
-    x_prediction = np.squeeze(preprocessing.data_upsample([x_prediction], "numpy", window_input_shape)[0])
+    x_prediction = np.squeeze(preprocessing.data_downsampling([x_prediction], "numpy", window_input_shape)[0])
+    x_prediction_uncertainty_volume = np.squeeze(preprocessing.data_downsampling([x_prediction_uncertainty_volume],
+                                                                                 "numpy", window_input_shape)[0])
 
     output_volume = nib.Nifti1Image(x_prediction, np.eye(4), nib.Nifti1Header())
 
-    current_data_path = "{0}/{1}.nii".format(current_output_path, str(j))
+    current_data_path = "{0}/{1}_output.nii".format(current_output_path, str(j))
     nib.save(output_volume, current_data_path)
 
-    return current_data_path
+    output_uncertainty_volume = nib.Nifti1Image(x_prediction_uncertainty_volume, np.eye(4), nib.Nifti1Header())
+
+    current_uncertainty_data_path = "{0}/{1}_uncertainty.nii".format(output_uncertainty_volume, str(j))
+    nib.save(output_uncertainty_volume, current_uncertainty_data_path)
+
+    return current_data_path, current_uncertainty_data_path
 
 
 def output_patient_time_point_predictions(window_data_paths, windowed_full_input_axial_size, full_input_shape,
-                                          current_output_path, i):
+                                          current_output_path, current_output_prefix, i):
     print("output_patient_time_point_predictions")
 
     if len(window_data_paths) > 1:
@@ -514,11 +522,11 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
     else:
         output_array = nib.load(window_data_paths[0]).get_data()
 
-    output_array = np.squeeze(preprocessing.data_upsample([output_array], "numpy", full_input_shape)[0])
+    output_array = np.squeeze(preprocessing.data_downsampling([output_array], "numpy", full_input_shape)[0])
 
     output_volume = nib.Nifti1Image(output_array, np.eye(4), nib.Nifti1Header())
 
-    current_data_path = "{0}/{1}.nii".format(current_output_path, str(i))
+    current_data_path = "{0}/{1}_{2}.nii".format(current_output_path, str(i), current_output_prefix)
     nib.save(output_volume, current_data_path)
 
     return current_data_path
@@ -542,6 +550,9 @@ def train_model():
                        show_layer_names=True, expand_nested=True)
 
     for i in range(len(y)):
+        if parameters.new_model_patient_bool:
+            model, optimiser, loss = architecture.get_model(data_shape)
+
         print("Patient/Time point:\t{0}".format(str(i)))
 
         patient_output_path = "{0}/{1}".format(output_path, str(i))
@@ -553,8 +564,12 @@ def train_model():
         number_of_windows = np.load(x[i]).shape[0]
 
         current_window_data_paths = []
+        current_window_uncertainty_data_paths = []
 
         for j in range(number_of_windows):
+            if parameters.new_model_window_bool:
+                model, optimiser, loss = architecture.get_model(data_shape)
+
             print("Window:\t{0}".format(str(j)))
 
             window_output_path = "{0}/{1}".format(patient_output_path, str(j))
@@ -585,19 +600,25 @@ def train_model():
                 x_train_iteration = x_train_iteration.astype(np.float32)
                 y_train_iteration = y_train_iteration.astype(np.float32)
 
+            x_train_iteration = tf.convert_to_tensor(x_train_iteration)
+            y_train_iteration = tf.convert_to_tensor(y_train_iteration)
+
             if gt is not None:
-                gt_prediction = np.asarray([np.load(gt[i])[j]])
+                gt_prediction = tf.convert_to_tensor([np.load(gt[i])[j]])
             else:
                 gt_prediction = None
 
             total_iterations = 0
 
             loss_list = []
-            previous_x_prediction_list = []
+            evaluation_loss_list = []
             previous_model_weight_list = []
             previous_optimiser_weight_list = []
 
-            relative_plateau_cutoff = None
+            x_prediction, relative_plateau_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
+            current_accuracy = test_step(model, loss, x_train_iteration, y_train_iteration, [])
+
+            relative_plateau_cutoff = parameters.plateau_cutoff * relative_plateau_loss_list[-1]
 
             gt_accuracy = None
             max_accuracy = 0.0
@@ -606,35 +627,31 @@ def train_model():
             while True:
                 print("Iteration:\t{0:<20}\tTotal iterations:\t{1:<20}".format(str(len(loss_list)), str(total_iterations)))
 
-                model, loss_list, uncertainty, previous_x_prediction_list, previous_model_weight_list,\
-                previous_optimiser_weight_list, relative_plateau_cutoff = \
+                model, loss_list, uncertainty, previous_model_weight_list, previous_optimiser_weight_list = \
                     train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list,
-                               previous_x_prediction_list, previous_model_weight_list, previous_optimiser_weight_list,
-                               relative_plateau_cutoff, model_output_path)
+                               previous_model_weight_list, previous_optimiser_weight_list, relative_plateau_cutoff,
+                               model_output_path)
 
-                if len(previous_x_prediction_list) > parameters.bayesian_test_iterations - 1:
-                    previous_x_prediction_list.pop(0)
+                x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
+                current_accuracy = test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss_list)
 
-                x_prediction, x_prediction_uncertainty, current_accuracy = \
-                    test_step(model, x_train_iteration, y_train_iteration)
-
-                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}\tUncertainty:\t{2:<20}".format(str(loss_list[-1].numpy()), str(current_accuracy), str(uncertainty.numpy())))
+                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}\tUncertainty:\t{2:<20}".format(str(loss_list[-1].numpy()), str(current_accuracy.numpy()), str(uncertainty.numpy())))
 
                 if gt is not None:
-                    gt_accuracy = get_evaluation_score(x_prediction, gt_prediction)
+                    gt_accuracy = losses.correlation_coefficient_accuracy(gt_prediction, x_prediction)
 
                     if max_accuracy < gt_accuracy:
                         max_accuracy = gt_accuracy
                         max_accuracy_iteration = len(loss_list)
 
-                    print("GT accuracy:\t{0:<20}\tGT uncertainty:\t{1:<20}".format(str(gt_accuracy), str(x_prediction_uncertainty.numpy())))
+                    print("GT loss:\t{0:<20}\tGT accuracy:\t{1:<20}\tGT uncertainty:\t{2:<20}".format(str(evaluation_loss_list[-1].numpy()), str(gt_accuracy.numpy()), str(x_prediction_uncertainty.numpy())))
                 else:
                     if max_accuracy < current_accuracy:
                         max_accuracy = current_accuracy
                         max_accuracy_iteration = len(loss_list)
 
-                x_prediction = np.squeeze(x_prediction).astype(np.float64)
-                y_plot = np.squeeze(y_train_iteration).astype(np.float64)
+                x_output = np.squeeze(x_prediction.numpy()).astype(np.float64)
+                y_output = np.squeeze(y_train_iteration.numpy()).astype(np.float64)
 
                 plt.figure()
 
@@ -643,14 +660,14 @@ def train_model():
                 else:
                     plt.subplot(1, 2, 1)
 
-                plt.imshow(x_prediction[:, :, int(x_prediction.shape[2] / 2)], cmap="Greys")
+                plt.imshow(x_output[:, :, int(x_output.shape[2] / 2)], cmap="Greys")
 
                 if gt is not None:
                     plt.subplot(1, 3, 2)
                 else:
                     plt.subplot(1, 2, 2)
 
-                plt.imshow(y_plot[:, :, int(y_plot.shape[2] / 2)], cmap="Greys")
+                plt.imshow(y_output[:, :, int(y_output.shape[2] / 2)], cmap="Greys")
 
                 if gt_prediction is not None:
                     gt_plot = np.squeeze(gt_prediction).astype(np.float64)
@@ -688,12 +705,12 @@ def train_model():
                         if int(split_array[0]) > len(loss_list):
                             os.remove("{0}/{1}".format(model_output_path, current_plot_file))
 
-                if len(loss_list) >= parameters.patience:
-                    loss_gradient = np.gradient(loss_list)[-parameters.patience:]
+                if len(evaluation_loss_list) >= parameters.patience:
+                    loss_gradient = np.gradient(evaluation_loss_list)[-parameters.patience:]
 
                     if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
                         print("Reached plateau: Exiting...")
-                        print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy), str(max_accuracy_iteration)))
+                        print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy.numpy()), str(max_accuracy_iteration)))
 
                         if gt is not None:
                             accuracy_loss = np.abs(gt_accuracy - max_accuracy)
@@ -706,12 +723,21 @@ def train_model():
 
                 total_iterations = total_iterations + 1
 
-            current_window_data_paths.append(output_window_predictions(x_prediction, y_train_iteration,
-                                                                       preprocessing_steps, window_input_shape,
-                                                                       window_output_path, j))
+            current_window_data_path, current_window_uncertainty_data_path = \
+                output_window_predictions(x_output, y_output,
+                                          np.squeeze(x_prediction_uncertainty_volume.numpy()).astype(np.float64),
+                                          preprocessing_steps, window_input_shape, window_output_path, j)
 
-        output_patient_time_point_predictions(current_window_data_paths, windowed_full_input_axial_size,
-                                              full_input_shape, patient_output_path, i)
+            current_window_data_paths.append(current_window_data_path)
+            current_window_uncertainty_data_paths.append(current_window_uncertainty_data_path)
+
+        output_patient_time_point_predictions(current_window_data_paths,
+                                              windowed_full_input_axial_size,
+                                              full_input_shape, patient_output_path, "output", i)
+
+        output_patient_time_point_predictions(current_window_uncertainty_data_paths,
+                                              windowed_full_input_axial_size,
+                                              full_input_shape, patient_output_path, "uncertainty", i)
 
 
 def main():
