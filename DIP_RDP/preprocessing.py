@@ -7,7 +7,8 @@ import math
 import numpy as np
 import scipy.stats
 import scipy.ndimage
-from sklearn.preprocessing import StandardScaler, PowerTransformer, RobustScaler
+from sklearn.preprocessing import StandardScaler, PowerTransformer
+import gzip
 
 
 import main
@@ -136,7 +137,8 @@ def data_upsample(data, data_type, new_resolution=None):
         data_copy = np.expand_dims(data_copy, -1)
 
         if data_type == "path":
-            np.save(data[i], data_copy)
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy
@@ -216,7 +218,8 @@ def data_downsampling(data, data_type, new_resolution=None):
         data_copy = np.expand_dims(data_copy, -1)
 
         if data_type == "path":
-            np.save(data[i], data_copy)
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy
@@ -224,45 +227,7 @@ def data_downsampling(data, data_type, new_resolution=None):
     return data
 
 
-# https://github.com/scikit-learn/scikit-learn/blob/2beed5584/sklearn/preprocessing/_data.py#L2938
-def yeo_johnson_inverse_transform(power_transformer, x):
-    def _yeo_johnson_inverse_transform(_x, _lmbda):
-        _x_inv = np.zeros_like(_x)
-        pos = (_x >= 0)
-
-        if np.count_nonzero(pos) > 0:
-            # when x >= 0
-            if abs(_lmbda) < np.spacing(1.0):
-                _x_inv[pos] = np.exp(_x[pos]) - 1.0
-            else:  # lmbda != 0
-                _x_inv[pos] = np.power((_x[pos] * _lmbda) + 1.0, 1.0 / _lmbda) - 1.0
-
-            x_inv_pos_max = float(np.nanmax(_x_inv[pos]))
-            _x_inv[pos] = np.nan_to_num(_x_inv[pos], copy=False, nan=x_inv_pos_max, posinf=x_inv_pos_max,
-                                        neginf=float(np.nanmin(_x_inv[pos])))
-
-        if np.count_nonzero(~pos) > 0:
-            # when x < 0
-            if abs(_lmbda - 2.0) > np.spacing(1.0):
-                _x_inv[~pos] = 1.0 - np.power((-(2.0 - _lmbda) * _x[~pos]) + 1.0, 1.0 / (2.0 - _lmbda))
-            else:  # lmbda == 2
-                _x_inv[~pos] = 1.0 - np.exp(-_x[~pos])
-
-            x_inv_not_pos_min = float(np.nanmin(_x_inv[~pos]))
-            _x_inv[~pos] = np.nan_to_num(_x_inv[~pos], copy=False, nan=x_inv_not_pos_min,
-                                         posinf=float(np.nanmax(_x_inv[~pos])), neginf=x_inv_not_pos_min)
-
-        return _x_inv
-
-    x_inv = x.copy()
-
-    for i, lmbda in enumerate(power_transformer.lambdas_):
-        x_inv[:, i] = _yeo_johnson_inverse_transform(x_inv[:, i], lmbda)
-
-    return x_inv
-
-
-def data_preprocessing(data, data_type, preprocessing_steps=None):
+def data_preprocessing(data, data_type, preprocessing_steps=None, data_max_min=None):
     print("data_preprocessing")
 
     if preprocessing_steps is None:
@@ -270,6 +235,12 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
 
         for _ in range(len(data)):
             preprocessing_steps.append(None)
+
+    if data_max_min is None:
+        data_max_min = []
+
+        for _ in range(len(data)):
+            data_max_min.append(None)
 
     for i in range(len(data)):
         if data_type == "path":
@@ -283,6 +254,8 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
         data_copy_shape = data_copy.shape
         data_copy = data_copy.reshape(-1, 1)
 
+        data_copy_max_min = []
+
         if preprocessing_steps[i] is None:
             current_preprocessing_steps = [StandardScaler(copy=False)]
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
@@ -290,13 +263,21 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
             current_preprocessing_steps.append(PowerTransformer(standardize=False, copy=False))
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
 
+            data_copy_max_min.append(np.max(data_copy))
+            data_copy_max_min.append(np.min(data_copy))
+
+            data_max_min[i] = data_copy_max_min
+
             current_preprocessing_steps.append(StandardScaler(copy=False))
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
 
             preprocessing_steps[i] = current_preprocessing_steps
         else:
             data_copy = preprocessing_steps[i][2].inverse_transform(data_copy)
-            data_copy = yeo_johnson_inverse_transform(preprocessing_steps[i][1], data_copy)
+
+            data_copy = np.clip(data_copy, data_max_min[i][1], data_max_min[i][0])
+            data_copy = preprocessing_steps[i][1].inverse_transform(data_copy)
+
             data_copy = preprocessing_steps[i][0].inverse_transform(data_copy)
 
             data_copy_background = scipy.stats.mode(data_copy, axis=None, nan_policy="omit")[0][0]
@@ -306,59 +287,10 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
         data_copy = data_copy.reshape(data_copy_shape)
 
         if data_type == "path":
-            np.save(data[i], data_copy)
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy
 
-    return data, preprocessing_steps
-
-
-def redistribute(data, data_type, robust_bool=False, new_distribution=None, new_distribution_type=None):
-    print("redistribute")
-
-    for i in range(len(data)):
-        if data_type == "path":
-            data_copy = np.load(data[i])
-        else:
-            if data_type == "numpy":
-                data_copy = data[i].copy()
-            else:
-                data_copy = None
-
-        data_copy_shape = data_copy.shape
-        data_copy = data_copy.reshape(-1, 1)
-
-        if robust_bool:
-            data_copy = RobustScaler(copy=False).fit_transform(data_copy)
-        else:
-            data_copy = StandardScaler(copy=False).fit_transform(data_copy)
-
-        if new_distribution is not None:
-            if new_distribution_type == "path":
-                new_distribution_copy = np.load(new_distribution[i])
-            else:
-                if new_distribution_type == "numpy":
-                    new_distribution_copy = new_distribution[i].copy()
-                else:
-                    new_distribution_copy = None
-
-            new_distribution_copy = new_distribution_copy.reshape(-1, 1)
-
-            if robust_bool:
-                standard_scaler = RobustScaler(copy=False)
-            else:
-                standard_scaler = StandardScaler(copy=False)
-
-            standard_scaler.fit(new_distribution_copy)
-            data_copy = standard_scaler.inverse_transform(data_copy)
-
-        data_copy = data_copy.reshape(data_copy_shape)
-
-        if data_type == "path":
-            np.save(data[i], data_copy)
-        else:
-            if data_type == "numpy":
-                data[i] = data_copy
-
-    return data
+    return data, preprocessing_steps, data_max_min

@@ -12,7 +12,7 @@ import tensorflow as tf
 import tensorflow.keras as k
 import matplotlib.pyplot as plt
 import nibabel as nib
-from tqdm import trange
+import gzip
 
 
 reproducible_bool = True
@@ -103,7 +103,7 @@ def get_data_windows(data):
 
             current_data = []
 
-            for i in trange(number_of_windows):
+            for i in range(number_of_windows):
                 current_overlap_index = overlap_index * i
 
                 current_data.append(
@@ -155,7 +155,7 @@ def get_train_data():
     current_shape = None
     windowed_full_input_axial_size = None
 
-    for i in trange(len(y_files)):
+    for i in range(len(y_files)):
         current_volume = nib.load(y_files[i])
         current_array = current_volume.get_data()
 
@@ -168,13 +168,19 @@ def get_train_data():
             current_shape = current_array[0].shape
 
         current_y_train_path = "{0}/{1}.npy".format(y_train_output_path, str(i))
-        np.save(current_y_train_path, current_array)
+
+        with gzip.GzipFile(current_y_train_path, "w") as file:
+            np.save(file, current_array)
+
         y.append(current_y_train_path)
 
         current_array = np.random.normal(size=current_array.shape)
 
         current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
-        np.save(current_x_train_path, current_array)
+
+        with gzip.GzipFile(current_x_train_path, "w") as file:
+            np.save(file, current_array)
+
         x.append(current_x_train_path)
 
     y = np.asarray(y)
@@ -193,13 +199,16 @@ def get_train_data():
         if not os.path.exists(gt_train_output_path):
             os.makedirs(gt_train_output_path, mode=0o770)
 
-        for i in trange(len(gt_files)):
+        for i in range(len(gt_files)):
             current_array = nib.load(gt_files[i]).get_data()
 
             current_array, _ = get_data_windows(current_array)
 
             current_gt_train_path = "{0}/{1}.npy".format(gt_train_output_path, str(i))
-            np.save(current_gt_train_path, current_array)
+
+            with gzip.GzipFile(current_gt_train_path, "w") as file:
+                np.save(file, current_array)
+
             gt.append(current_gt_train_path)
 
         gt = np.asarray(gt)
@@ -289,7 +298,7 @@ def output_window_predictions(x_prediction, input_volume, window_input_shape, in
 
     output_volume = nib.Nifti1Image(x_prediction, np.eye(4), nib.Nifti1Header())
 
-    current_data_path = "{0}/{1}.nii".format(current_output_path, str(j))
+    current_data_path = "{0}/{1}.nii.gz".format(current_output_path, str(j))
     nib.save(output_volume, current_data_path)
 
     return current_data_path
@@ -310,7 +319,7 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
 
         output_arrays = []
 
-        for l in trange(number_of_windows):
+        for l in range(number_of_windows):
             current_overlap_index = overlap_index * l
 
             current_output_array = np.zeros((full_input_shape[0], full_input_shape[1], windowed_full_input_axial_size))
@@ -330,7 +339,7 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
 
     output_volume = nib.Nifti1Image(output_array, np.eye(4), nib.Nifti1Header())
 
-    current_data_path = "{0}/{1}.nii".format(current_output_path, str(i))
+    current_data_path = "{0}/{1}.nii.gz".format(current_output_path, str(i))
     nib.save(output_volume, current_data_path)
 
     return current_data_path
@@ -344,7 +353,7 @@ def train_model():
     gt = \
         get_preprocessed_train_data()
 
-    for i in trange(len(y)):
+    for i in range(len(y)):
         print("Patient/Time point:\t{0}".format(str(i)))
 
         patient_output_path = "{0}/{1}".format(output_path, str(i))
@@ -357,7 +366,7 @@ def train_model():
 
         current_window_data_paths = []
 
-        for j in trange(number_of_windows):
+        for j in range(number_of_windows):
             print("Window:\t{0}".format(str(j)))
 
             window_output_path = "{0}/{1}".format(patient_output_path, str(j))

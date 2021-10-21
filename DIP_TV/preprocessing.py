@@ -8,7 +8,7 @@ import numpy as np
 import scipy.stats
 import scipy.ndimage
 from sklearn.preprocessing import StandardScaler
-from tqdm import trange
+import gzip
 
 import main
 import parameters
@@ -35,7 +35,7 @@ def data_upsample(data, data_type, new_resolution=None):
 
     geometric_sequence_a0 = 2
 
-    for i in trange(len(data)):
+    for i in range(len(data)):
         if data_type == "path":
             data_copy = np.load(data[i], allow_pickle=True)
         else:
@@ -56,7 +56,7 @@ def data_upsample(data, data_type, new_resolution=None):
         else:
             data_copy_shape = list(data_copy.shape)
 
-            for j in trange(len(data_copy_shape)):
+            for j in range(len(data_copy_shape)):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
@@ -77,7 +77,8 @@ def data_upsample(data, data_type, new_resolution=None):
         data_copy = np.expand_dims(data_copy, -1)
 
         if data_type == "path":
-            np.save(data[i], data_copy)
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy
@@ -91,7 +92,7 @@ def data_preprocessing(data, data_type, scalers=None):
     if scalers is None:
         scalers = []
 
-    for i in trange(len(data)):
+    for i in range(len(data)):
         if data_type == "path":
             data_copy = np.load(data[i], allow_pickle=True)
         else:
@@ -116,7 +117,8 @@ def data_preprocessing(data, data_type, scalers=None):
         data_copy = data_copy.reshape(data_copy_shape)
 
         if data_type == "path":
-            np.save(data[i], data_copy)
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
         else:
             if data_type == "numpy":
                 data[i] = data_copy

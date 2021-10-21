@@ -155,15 +155,9 @@ def get_dropout(x):
 
     if parameters.dropout > 0.0:
         if len(x.shape) > 2:
-            if parameters.bayesian_bool:
-                x = k.layers.SpatialDropout3D(rate=parameters.dropout)(x, training=True)
-            else:
-                x = k.layers.SpatialDropout3D(rate=parameters.dropout)(x)
+            x = k.layers.SpatialDropout3D(rate=parameters.dropout)(x)
         else:
-            if parameters.bayesian_bool:
-                x = k.layers.Dropout(rate=parameters.dropout)(x, training=True)
-            else:
-                x = k.layers.Dropout(rate=parameters.dropout)(x)
+            x = k.layers.Dropout(rate=parameters.dropout)(x)
 
     return x
 

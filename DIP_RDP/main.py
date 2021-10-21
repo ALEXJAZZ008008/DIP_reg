@@ -7,7 +7,6 @@ import gc
 import os
 import re
 import shutil
-import math
 import random
 import numpy as np
 import scipy.constants
@@ -18,8 +17,10 @@ import tensorflow.keras as k
 import pickle
 import matplotlib.pyplot as plt
 import nibabel as nib
+import gzip
 
 import losses
+
 
 reproducible_bool = True
 
@@ -100,7 +101,7 @@ def get_data_windows(data):
 
     if axial_size > parameters.data_window_size:
         if parameters.data_window_bool:
-            number_of_windows = int(np.ceil(axial_size / parameters.data_window_size))
+            number_of_windows = int(np.ceil(axial_size / parameters.data_window_size)) + 1
             number_of_overlaps = number_of_windows - 1
 
             overlap_size = \
@@ -184,8 +185,11 @@ def get_train_data():
         if current_shape is None:
             current_shape = current_array[0].shape
 
-        current_y_train_path = "{0}/{1}.npy".format(y_train_output_path, str(i))
-        np.save(current_y_train_path, current_array)
+        current_y_train_path = "{0}/{1}.npy.gz".format(y_train_output_path, str(i))
+
+        with gzip.GzipFile(current_y_train_path, "w") as file:
+            np.save(file, current_array)
+
         y.append(current_y_train_path)
 
         if parameters.data_input_bool:
@@ -197,22 +201,26 @@ def get_train_data():
                                                                      parameters.data_gaussian_smooth_sigma_z),
                                                               mode="mirror")
 
-                current_array = preprocessing.redistribute([current_array], "numpy")[0]
+                current_array = current_array / np.std(current_array)
+                current_array = current_array - np.mean(current_array)
         else:
             current_array = np.zeros(current_array.shape)
 
         if parameters.input_gaussian_weight > 0.0:
             if parameters.data_input_bool:
-                current_array, _ = preprocessing.data_preprocessing(current_array, "numpy")
+                current_array, _, _ = preprocessing.data_preprocessing(current_array, "numpy")
 
             if gaussian_noise is None:
-                gaussian_noise = preprocessing.redistribute([np.random.normal(size=current_array.shape)], "numpy")[0]
+                gaussian_noise = np.random.normal(size=current_array.shape)
 
             current_array = (current_array + (parameters.input_gaussian_weight * gaussian_noise)) / \
                             (1.0 + parameters.input_gaussian_weight)
 
-        current_x_train_path = "{0}/{1}.npy".format(x_train_output_path, str(i))
-        np.save(current_x_train_path, current_array)
+        current_x_train_path = "{0}/{1}.npy.gz".format(x_train_output_path, str(i))
+
+        with gzip.GzipFile(current_x_train_path, "w") as file:
+            np.save(file, current_array)
+
         x.append(current_x_train_path)
 
     y = np.asarray(y)
@@ -236,8 +244,11 @@ def get_train_data():
 
             current_array, _ = get_data_windows(current_array)
 
-            current_gt_train_path = "{0}/{1}.npy".format(gt_train_output_path, str(i))
-            np.save(current_gt_train_path, current_array)
+            current_gt_train_path = "{0}/{1}.npy.gz".format(gt_train_output_path, str(i))
+
+            with gzip.GzipFile(current_gt_train_path, "w") as file:
+                np.save(file, current_array)
+
             gt.append(current_gt_train_path)
 
         gt = np.asarray(gt)
@@ -258,13 +269,14 @@ def get_preprocessed_train_data():
     if gt is not None:
         gt = preprocessing.data_upsample(gt, "path")
 
-    x, _ = preprocessing.data_preprocessing(x, "path")
-    y, preprocessing_steps = preprocessing.data_preprocessing(y, "path")
+    x, _, _ = preprocessing.data_preprocessing(x, "path")
+    y, preprocessing_steps, data_max_min = preprocessing.data_preprocessing(y, "path")
 
     if gt is not None:
-        gt, _ = preprocessing.data_preprocessing(gt, "path")
+        gt, _, _ = preprocessing.data_preprocessing(gt, "path")
 
-    return x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt
+    return x, y, preprocessing_steps, data_max_min, full_input_shape, windowed_full_input_axial_size, \
+           window_input_shape, gt
 
 
 # https://stackoverflow.com/questions/43137288/how-to-determine-needed-memory-of-keras-model
@@ -378,21 +390,15 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
             # Compute the loss value for this minibatch.
             current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
+                                               losses.max_min_constraint(y_train_iteration, logits),
                                                parameters.uncertainty_weight * uncertainty,
-                                               tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[::3]),
-                                                                            tf.zeros_like(model.losses[::3]),
-                                                                            model.losses[::3])),
-                                               tf.math.reduce_mean([
-                                                   tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[1::3]),
-                                                                                tf.zeros_like(model.losses[1::3]),
-                                                                                model.losses[1::3])),
-                                                   tf.math.reduce_mean(tf.where(tf.math.is_nan(model.losses[2::3]),
-                                                                                tf.zeros_like(model.losses[2::3]),
-                                                                                model.losses[2::3]))])])
+                                               tf.math.reduce_mean(model.losses[::3]),
+                                               parameters.l1_weight_activity * tf.math.reduce_mean(model.losses[1::3]),
+                                               parameters.l1_weight_prelu * tf.math.reduce_mean(model.losses[2::3])])
 
         loss_list.append(current_loss)
 
-        if math.isnan(loss_list[-1]) or math.isinf(loss_list[-1]):
+        if np.isnan(loss_list[-1].numpy()) or np.isinf(loss_list[-1].numpy()):
             tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
             current_loss_increase_patience = train_backup(model, optimiser, loss_list, previous_model_weight_list,
                                                           previous_optimiser_weight_list,
@@ -401,7 +407,12 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
             continue
 
         if len(loss_list) > 1:
-            loss_gradient = np.gradient(loss_list)[-1]
+            current_patience = parameters.patience
+
+            if current_patience < 2:
+                current_patience = 2
+
+            loss_gradient = np.gradient(loss_list[-current_patience:])[-1]
 
             if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
                 if not (loss_list[-1] * (parameters.backtracking_weight_percentage / 100.0) < loss_list[-2]):
@@ -424,7 +435,7 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
     # Use the gradient tape to automatically retrieve
     # the gradients of the trainable variables with respect to the loss.
-    grads = tape.gradient(loss_list[-1], model.trainable_weights)
+    grads = tape.gradient(current_loss, model.trainable_weights)
 
     del tape
 
@@ -435,13 +446,16 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
     return model, loss_list, uncertainty, previous_model_weight_list, previous_optimiser_weight_list
 
 
-def get_bayesian_test_prediction(model, x_train_iteration):
+def get_bayesian_test_prediction(model, x_train_iteration, bayesian_iteration, bayesian_bool):
     print("get_bayesian_test_prediction")
 
     x_prediction_list = []
 
-    for i in range(parameters.bayesian_test_iterations):
-        x_prediction_list.append(model(x_train_iteration, training=False))
+    if not bayesian_bool:
+        bayesian_iteration = 1
+
+    for i in range(bayesian_iteration):
+        x_prediction_list.append(model(x_train_iteration, training=bayesian_bool))
 
     x_prediction = tf.math.reduce_mean(x_prediction_list, axis=0)
 
@@ -458,7 +472,8 @@ def test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss
     print("test_step")
 
     x_prediction, x_prediction_uncertainty, x_prediction_uncertainty_volume = \
-        get_bayesian_test_prediction(model, x_train_iteration)
+        get_bayesian_test_prediction(model, x_train_iteration, parameters.bayesian_iterations,
+                                     parameters.bayesian_test_bool)
 
     evaluation_loss_list.append(loss(y_train_iteration, x_prediction))
 
@@ -468,25 +483,44 @@ def test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss
            current_accuracy
 
 
-def output_window_predictions(x_prediction, y_train_iteration, x_prediction_uncertainty_volume, preprocessing_steps,
-                              window_input_shape, current_output_path, j):
+def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, x_prediction_uncertainty_volume,
+                              preprocessing_steps, data_max_min, window_input_shape, current_output_path, j):
     print("output_window_predictions")
 
-    x_prediction = preprocessing.redistribute([x_prediction], "numpy", True, [y_train_iteration], "numpy")[0]
-    x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps)[0][0]
-
+    x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps, data_max_min)[0][0]
     x_prediction = np.squeeze(preprocessing.data_downsampling([x_prediction], "numpy", window_input_shape)[0])
+
     x_prediction_uncertainty_volume = np.squeeze(preprocessing.data_downsampling([x_prediction_uncertainty_volume],
                                                                                  "numpy", window_input_shape)[0])
 
+    if gt_prediction is not None:
+        gt_prediction = preprocessing.data_preprocessing([gt_prediction], "numpy", preprocessing_steps,
+                                                         data_max_min)[0][0]
+        gt_prediction = np.squeeze(preprocessing.data_downsampling([gt_prediction], "numpy", window_input_shape)[0])
+
+        gt_accuracy = losses.correlation_coefficient_accuracy(gt_prediction, x_prediction)
+
+        print("Output accuracy:\t{0:<20}".format(str(gt_accuracy.numpy())))
+    else:
+        y_train_iteration = preprocessing.data_preprocessing([y_train_iteration], "numpy", preprocessing_steps,
+                                                             data_max_min)[0][0]
+        y_train_iteration = np.squeeze(preprocessing.data_downsampling([y_train_iteration], "numpy",
+                                                                       window_input_shape)[0])
+
+        y_train_accuracy = losses.correlation_coefficient_accuracy(y_train_iteration, x_prediction)
+
+        print("Output accuracy:\t{0:<20}".format(str(y_train_accuracy.numpy())))
+
+    print("Output uncertainty:\t{0:<20}".format(str(tf.math.reduce_mean(x_prediction_uncertainty_volume).numpy())))
+
     output_volume = nib.Nifti1Image(x_prediction, np.eye(4), nib.Nifti1Header())
 
-    current_data_path = "{0}/{1}_output.nii".format(current_output_path, str(j))
+    current_data_path = "{0}/{1}_output.nii.gz".format(current_output_path, str(j))
     nib.save(output_volume, current_data_path)
 
     output_uncertainty_volume = nib.Nifti1Image(x_prediction_uncertainty_volume, np.eye(4), nib.Nifti1Header())
 
-    current_uncertainty_data_path = "{0}/{1}_uncertainty.nii".format(output_uncertainty_volume, str(j))
+    current_uncertainty_data_path = "{0}/{1}_uncertainty.nii.gz".format(current_output_path, str(j))
     nib.save(output_uncertainty_volume, current_uncertainty_data_path)
 
     return current_data_path, current_uncertainty_data_path
@@ -497,27 +531,43 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
     print("output_patient_time_point_predictions")
 
     if len(window_data_paths) > 1:
-        number_of_windows = int(np.ceil(full_input_shape[-1] / parameters.data_window_size))
+        number_of_windows = int(np.ceil(full_input_shape[-1] / parameters.data_window_size)) + 1
         number_of_overlaps = number_of_windows - 1
 
         overlap_size = int(np.ceil((((parameters.data_window_size * number_of_windows) -
                                      full_input_shape[-1]) / number_of_overlaps)))
         overlap_index = int(np.ceil(parameters.data_window_size - overlap_size))
 
+        output_ramp_filter_increasing = np.zeros((full_input_shape[0], full_input_shape[1], overlap_size))
+        output_ramp_filter_increment = 1.0 / (overlap_size + 1.0)
+
+        for l in range(overlap_size):
+            output_ramp_filter_increasing[:, :, l] = output_ramp_filter_increment * (l + 1.0)
+
+        output_ramp_filter_decreasing = np.flip(output_ramp_filter_increasing, axis=-1)
+
         output_arrays = []
 
         for l in range(number_of_windows):
             current_overlap_index = overlap_index * l
 
-            current_output_array = np.zeros((full_input_shape[0], full_input_shape[1], windowed_full_input_axial_size))
+            current_data = nib.load(window_data_paths[l]).get_data()
 
+            if l != 0:
+                current_data[:, :, :overlap_size] = current_data[:, :, :overlap_size] * output_ramp_filter_increasing
+
+            if l != number_of_windows - 1:
+                current_data[:, :, -overlap_size:] = current_data[:, :, -overlap_size:] * output_ramp_filter_decreasing
+
+            current_output_array = np.zeros((full_input_shape[0], full_input_shape[1], windowed_full_input_axial_size))
             current_output_array[:, :, current_overlap_index:current_overlap_index + parameters.data_window_size] = \
-                nib.load(window_data_paths[l]).get_data()
+                current_data
+
             current_output_array[np.isclose(current_output_array, 0.0)] = np.nan
 
             output_arrays.append(current_output_array)
 
-        output_array = np.nanmean(np.asarray(output_arrays), axis=0)
+        output_array = np.nansum(np.asarray(output_arrays), axis=0)
         output_array = np.nan_to_num(output_array, copy=False)
     else:
         output_array = nib.load(window_data_paths[0]).get_data()
@@ -526,7 +576,7 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
 
     output_volume = nib.Nifti1Image(output_array, np.eye(4), nib.Nifti1Header())
 
-    current_data_path = "{0}/{1}_{2}.nii".format(current_output_path, str(i), current_output_prefix)
+    current_data_path = "{0}/{1}_{2}.nii.gz".format(current_output_path, str(i), current_output_prefix)
     nib.save(output_volume, current_data_path)
 
     return current_data_path
@@ -536,8 +586,8 @@ def train_model():
     print("train_model")
 
     # get data and lables
-    x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = \
-        get_preprocessed_train_data()
+    x, y, preprocessing_steps, data_max_min, full_input_shape, windowed_full_input_axial_size, window_input_shape, \
+    gt = get_preprocessed_train_data()
 
     data_shape = np.load(x[0])[0].shape
 
@@ -548,6 +598,8 @@ def train_model():
 
     k.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
                        show_layer_names=True, expand_nested=True)
+
+    relative_plateau_cutoff = None
 
     for i in range(len(y)):
         if parameters.new_model_patient_bool:
@@ -615,14 +667,18 @@ def train_model():
             previous_model_weight_list = []
             previous_optimiser_weight_list = []
 
-            x_prediction, relative_plateau_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
-            current_accuracy = test_step(model, loss, x_train_iteration, y_train_iteration, [])
+            if relative_plateau_cutoff is None:
+                x_prediction, relative_plateau_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
+                current_accuracy = test_step(model, loss, x_train_iteration, y_train_iteration, [])
 
-            relative_plateau_cutoff = parameters.plateau_cutoff * relative_plateau_loss_list[-1]
+                relative_plateau_cutoff = parameters.plateau_cutoff * relative_plateau_loss_list[-1].numpy()
 
             gt_accuracy = None
-            max_accuracy = 0.0
+            max_accuracy = tf.cast(0.0, dtype=tf.float32)
             max_accuracy_iteration = 0
+
+            x_output = None
+            y_output = None
 
             while True:
                 print("Iteration:\t{0:<20}\tTotal iterations:\t{1:<20}".format(str(len(loss_list)), str(total_iterations)))
@@ -650,6 +706,13 @@ def train_model():
                         max_accuracy = current_accuracy
                         max_accuracy_iteration = len(loss_list)
 
+                if np.isnan(evaluation_loss_list[-1].numpy()):
+                    evaluation_loss_list.pop()
+
+                    print("WARNING: Evaluation loss has become NaN; continuing...")
+
+                    continue
+
                 x_output = np.squeeze(x_prediction.numpy()).astype(np.float64)
                 y_output = np.squeeze(y_train_iteration.numpy()).astype(np.float64)
 
@@ -669,7 +732,7 @@ def train_model():
 
                 plt.imshow(y_output[:, :, int(y_output.shape[2] / 2)], cmap="Greys")
 
-                if gt_prediction is not None:
+                if gt is not None:
                     gt_plot = np.squeeze(gt_prediction).astype(np.float64)
 
                     plt.subplot(1, 3, 3)
@@ -705,10 +768,24 @@ def train_model():
                         if int(split_array[0]) > len(loss_list):
                             os.remove("{0}/{1}".format(model_output_path, current_plot_file))
 
-                if len(evaluation_loss_list) >= parameters.patience:
-                    loss_gradient = np.gradient(evaluation_loss_list)[-parameters.patience:]
+                evaluation_loss_list_len = len(evaluation_loss_list)
 
-                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
+                if evaluation_loss_list_len > 1 and evaluation_loss_list_len >= parameters.patience:
+                    current_patience = parameters.patience
+
+                    if current_patience < 2:
+                        current_patience = 2
+
+                    loss_gradient = np.gradient(evaluation_loss_list[-current_patience:])[-parameters.patience:]
+
+                    current_plateau_cutoff = parameters.plateau_cutoff
+
+                    if parameters.relative_plateau_cutoff_bool:
+                        current_plateau_cutoff = relative_plateau_cutoff
+
+                    print("Plateau cutoff:\t{0:<20}\tMax distance to plateau cutoff:\t{1:<20}".format(str(current_plateau_cutoff), str(np.max(np.abs(loss_gradient) - current_plateau_cutoff))))
+
+                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=current_plateau_cutoff):
                         print("Reached plateau: Exiting...")
                         print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy.numpy()), str(max_accuracy_iteration)))
 
@@ -723,10 +800,17 @@ def train_model():
 
                 total_iterations = total_iterations + 1
 
+            if parameters.bayesian_test_bool != parameters.bayesian_output_bool:
+                x_prediction, x_prediction_uncertainty, x_prediction_uncertainty_volume = \
+                    get_bayesian_test_prediction(model, x_train_iteration, parameters.bayesian_iterations,
+                                                 parameters.bayesian_output_bool)
+
+                x_output = np.squeeze(x_prediction.numpy()).astype(np.float64)
+
             current_window_data_path, current_window_uncertainty_data_path = \
-                output_window_predictions(x_output, y_output,
+                output_window_predictions(x_output, y_output, gt_prediction.numpy(),
                                           np.squeeze(x_prediction_uncertainty_volume.numpy()).astype(np.float64),
-                                          preprocessing_steps, window_input_shape, window_output_path, j)
+                                          preprocessing_steps, data_max_min, window_input_shape, window_output_path, j)
 
             current_window_data_paths.append(current_window_data_path)
             current_window_uncertainty_data_paths.append(current_window_uncertainty_data_path)

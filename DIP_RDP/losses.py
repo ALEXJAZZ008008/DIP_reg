@@ -20,9 +20,6 @@ def log_cosh_loss(y_true, y_pred):
     def _log_cosh(x):
         return (x + tf.math.softplus(-2.0 * x)) - tf.math.log(2.0)
 
-    y_true = tf.cast(y_true, dtype=tf.float32)
-    y_pred = tf.cast(y_pred, dtype=tf.float32)
-
     return tf.math.reduce_mean(_log_cosh(y_pred - y_true))
 
 
@@ -80,7 +77,6 @@ def total_variation_loss(y_true, y_pred):
     def _pixel_dif_three(x, n1, n2, n3):
         return tf.math.reduce_sum(tf.stack([_pixel_dif_three_1(x, n1, n2, n3)]))
 
-    y_pred = tf.cast(y_pred, dtype=tf.float32)
     y_pred = y_pred - tf.math.reduce_min(y_pred)
 
     # The input is a batch of images with shape:
@@ -196,7 +192,6 @@ def relative_difference_loss(y_true, y_pred):
     def _pixel_dif_three(x, n1, n2, n3, _gamma):
         return tf.math.reduce_sum(tf.stack([_pixel_dif_three_1(x, n1, n2, n3, _gamma)]))
 
-    y_pred = tf.cast(y_pred, dtype=tf.float32)
     y_pred = y_pred - tf.math.reduce_min(y_pred)
 
     # The input is a batch of images with shape:
@@ -225,13 +220,22 @@ def log_cosh_relative_difference_loss(y_true, y_pred):
            (parameters.relative_difference_weight * relative_difference_loss(y_true, y_pred))
 
 
+def max_min_constraint(y_true, y_pred):
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
+
+    return parameters.max_min_constraint_weight * \
+           (tf.math.abs(tf.math.maximum(tf.math.reduce_max(y_true), tf.math.reduce_max(y_pred))) +
+            tf.math.abs(tf.math.minimum(tf.math.reduce_min(y_true), tf.math.reduce_min(y_pred))))
+
+
 def log_cosh_regulariser(weight_matrix):
     def _log_cosh(x):
         return (x + tf.math.softplus(-2.0 * x)) - tf.math.log(2.0)
 
     weight_matrix = tf.cast(weight_matrix, dtype=tf.float32)
 
-    return parameters.l1_weight * tf.math.reduce_mean(_log_cosh(weight_matrix))
+    return tf.math.reduce_mean(_log_cosh(weight_matrix))
 
 
 def l2_regulariser(weight_matrix):
