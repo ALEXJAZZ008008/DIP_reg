@@ -36,7 +36,7 @@ def get_encoder(x):
     layer_depth = [2, 4, 8, 16, 32]
     layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [1, 2, 4, 4, 4]
+    layer_groups = [1, 1, 1, 1, 1]
 
     unet_connections = []
 
@@ -51,20 +51,22 @@ def get_encoder(x):
                         trainable=False,
                         name="input")(x)
 
-    x = layers.get_gaussian_noise(x, parameters.input_skip_gaussian_sigma)
+    x = layers.get_gaussian_noise(x, parameters.input_gaussian_sigma)
+
+    x = layers.get_convolution_layer(x, 1, layer_kernel_size[0], (1, 1, 1), 1)
 
     for i in range(len(layer_layers)):
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
-        unet_connections.append(layers.get_gaussian_noise(x, parameters.input_skip_gaussian_sigma))
+        unet_connections.append(layers.get_gaussian_noise(x, parameters.skip_gaussian_sigma))
 
         x1 = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], layer_stride[i], layer_groups[i])
 
         x2 = layers.get_reflection_padding(x, layer_kernel_size[i])
         x2 = k.layers.MaxPooling3D(pool_size=layer_kernel_size[i],
                                    strides=layer_stride[i],
-                                   padding='valid')(x2)
+                                   padding="valid")(x2)
 
         x = k.layers.Concatenate()([x1, x2])
 
@@ -74,16 +76,14 @@ def get_encoder(x):
 def get_latent(x):
     print("get_latent")
 
-    layer_layers = [2]
+    layer_layers = [1]
     layer_depth = [64]
     layer_kernel_size = [(3, 3, 3)]
-    layer_groups = [4]
+    layer_groups = [1]
 
     for i in range(len(layer_layers)):
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
-
-        x = layers.get_gaussian_noise(x, parameters.input_skip_gaussian_sigma)
 
         x = k.layers.Conv3D(filters=layer_depth[i],
                             kernel_size=(1, 1, 1),
@@ -109,7 +109,7 @@ def get_decoder(x, unet_connections):
     layer_depth = [32, 16, 8, 4, 2]
     layer_kernel_size = [(3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3), (3, 3, 3)]
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)]
-    layer_groups = [4, 4, 4, 2, 1]
+    layer_groups = [1, 1, 1, 1, 1]
 
     for i in range(len(layer_depth)):
         x = layers.get_transpose_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
@@ -119,25 +119,24 @@ def get_decoder(x, unet_connections):
         x = layers.get_reflection_padding(x, layer_kernel_size[i])
         x = k.layers.AveragePooling3D(pool_size=layer_kernel_size[i],
                                       strides=layer_stride[i],
-                                      padding='valid')(x)
+                                      padding="valid")(x)
 
         x = k.layers.Concatenate()([x, unet_connections.pop()])
 
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
-    # output
-    output_kernel_size = (3, 3, 3)
+    x = layers.get_convolution_layer(x, 1, layer_kernel_size[-1], (1, 1, 1), 1)
 
-    x = layers.get_reflection_padding(x, output_kernel_size)
     x = k.layers.Conv3D(filters=1,
-                        kernel_size=output_kernel_size,
+                        kernel_size=(1, 1, 1),
                         strides=(1, 1, 1),
                         dilation_rate=(1, 1, 1),
                         groups=1,
                         padding="valid",
-                        kernel_initializer="he_normal",
+                        kernel_initializer=k.initializers.Constant(1.0),
                         bias_initializer=k.initializers.Constant(0.0),
+                        trainable=False,
                         name="output")(x)
 
     return x
@@ -149,12 +148,24 @@ def get_tensors(input_shape):
     x, input_x = get_input(input_shape)
 
     x, unet_connections = get_encoder(x)
-
     x = get_latent(x)
-
     output_x = get_decoder(x, unet_connections)
 
     return input_x, output_x
+
+
+def get_model_all(input_shape):
+    print("get_model_all")
+
+    model = get_model(input_shape)
+
+    loss = get_loss()
+    optimiser = get_optimiser()
+
+    gc.collect()
+    k.backend.clear_session()
+
+    return model, optimiser, loss
 
 
 def get_model(input_shape):
@@ -164,21 +175,29 @@ def get_model(input_shape):
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
+    gc.collect()
+    k.backend.clear_session()
+
+    return model
+
+
+def get_optimiser():
+    print("get_optimiser")
+
     if parameters.weight_decay > 0.0:
-        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)\
-            (weight_decay=parameters.weight_decay, clipvalue=6.0)  # noqa
+        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)(weight_decay=parameters.weight_decay, clipvalue=6.0)  # noqa
     else:
         optimiser = tf.keras.optimizers.Nadam(clipvalue=6.0)
+
+    return optimiser
+
+
+def get_loss():
+    print("get_loss")
 
     if parameters.relative_difference_bool:
         loss = losses.log_cosh_relative_difference_loss
     else:
-        if parameters.total_variation_bool:
-            loss = losses.log_cosh_total_variation_loss
-        else:
-            loss = losses.log_cosh_loss
+        loss = losses.log_cosh_loss
 
-    gc.collect()
-    k.backend.clear_session()
-
-    return model, optimiser, loss
+    return loss

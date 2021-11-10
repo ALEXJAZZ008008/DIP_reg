@@ -74,8 +74,8 @@ import preprocessing
 import architecture
 
 
-data_path = "{0}/DIP_RDP_data/xcat/".format(os.path.dirname(os.getcwd()))
-output_path = "{0}/output".format(os.getcwd())
+data_path = parameters.data_path
+output_path = parameters.output_path
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -211,10 +211,23 @@ def get_train_data():
                 current_array, _, _ = preprocessing.data_preprocessing(current_array, "numpy")
 
             if gaussian_noise is None:
-                gaussian_noise = np.random.normal(size=current_array.shape)
+                gaussian_update_path = "{0}/gaussian.npy.gk".format(parameters.gaussian_path)
 
-            current_array = (current_array + (parameters.input_gaussian_weight * gaussian_noise)) / \
-                            (1.0 + parameters.input_gaussian_weight)
+                if os.path.exists(gaussian_update_path):
+                    print("Previous gaussian found!")
+
+                    with gzip.GzipFile(gaussian_update_path, "r") as file:
+                        gaussian_noise = np.load(file)
+                else:
+                    gaussian_noise = np.random.normal(size=current_array.shape)
+
+                    gaussian_update_path = "{0}/gaussian.npy.gk".format(parameters.output_path)
+
+                    with gzip.GzipFile(gaussian_update_path, "w") as file:
+                        np.save(file, gaussian_noise)
+
+            current_array = ((current_array + (parameters.input_gaussian_weight * gaussian_noise)) /
+                             (1.0 + parameters.input_gaussian_weight))
 
         current_x_train_path = "{0}/{1}.npy.gz".format(x_train_output_path, str(i))
 
@@ -270,13 +283,12 @@ def get_preprocessed_train_data():
         gt = preprocessing.data_upsample(gt, "path")
 
     x, _, _ = preprocessing.data_preprocessing(x, "path")
-    y, preprocessing_steps, data_max_min = preprocessing.data_preprocessing(y, "path")
+    y, preprocessing_steps, data_min_maxes = preprocessing.data_preprocessing(y, "path")
 
     if gt is not None:
         gt, _, _ = preprocessing.data_preprocessing(gt, "path")
 
-    return x, y, preprocessing_steps, data_max_min, full_input_shape, windowed_full_input_axial_size, \
-           window_input_shape, gt
+    return x, y, preprocessing_steps, data_min_maxes, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt
 
 
 # https://stackoverflow.com/questions/43137288/how-to-determine-needed-memory-of-keras-model
@@ -326,13 +338,13 @@ def get_model_memory_usage(batch_size, model):
 def get_bayesian_train_prediction(model, x_train_iteration):
     x_prediction_1 = model(x_train_iteration, training=True)
 
+    gc.collect()
+    k.backend.clear_session()
+
     x_prediction = tf.math.reduce_mean([x_prediction_1], axis=0)
 
     x_prediction_uncertainty = tf.cast(tf.math.reduce_mean(tf.math.reduce_std([x_prediction_1], axis=0)),
                                        dtype=tf.float32)
-
-    gc.collect()
-    k.backend.clear_session()
 
     return x_prediction, x_prediction_uncertainty
 
@@ -350,32 +362,39 @@ def train_backup(model, optimiser, loss_list, previous_model_weight_list, previo
         previous_model_weight_list.pop()
         previous_optimiser_weight_list.pop()
 
-    model.set_weights(pickle.load(open(previous_model_weight_list[-1], "rb")))
+    with open(previous_model_weight_list[-1], "rb") as file:
+        model.set_weights(pickle.load(file))
 
     if len(previous_optimiser_weight_list) > 1:
-        optimiser.set_weights(pickle.load(open(previous_optimiser_weight_list[-1], "rb")))
+        with open(previous_optimiser_weight_list[-1], "rb") as file:
+            optimiser.set_weights(pickle.load(file))
+    else:
+        optimiser = architecture.get_optimiser()
 
     current_loss_increase_patience = current_loss_increase_patience + 1
 
-    if len(loss_list) > 0:
+    if len(loss_list) > 1:
         loss_list.pop()
         previous_model_weight_list.pop()
         previous_optimiser_weight_list.pop()
 
-    return tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
-           current_loss_increase_patience
+    return tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, current_loss_increase_patience
 
 
 def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list, previous_model_weight_list,
-               previous_optimiser_weight_list, relative_plateau_cutoff, model_output_path):
+               previous_optimiser_weight_list, model_output_path):
     current_loss_increase_patience = 0
 
     while True:
         previous_model_weight_list.append("{0}/model_{1}.pkl".format(model_output_path, str(len(previous_model_weight_list))))
-        pickle.dump(model.get_weights(), open(previous_model_weight_list[-1], "wb"))
+
+        with open(previous_model_weight_list[-1], "wb") as file:
+            pickle.dump(model.get_weights(), file)
 
         previous_optimiser_weight_list.append("{0}/optimiser_{1}.pkl".format(model_output_path, str(len(previous_optimiser_weight_list))))
-        pickle.dump(optimiser.get_weights(), open(previous_optimiser_weight_list[-1], "wb"))
+
+        with open(previous_optimiser_weight_list[-1], "wb") as file:
+            pickle.dump(optimiser.get_weights(), file)
 
         # Open a GradientTape to record the operations run
         # during the forward pass, which enables auto-differentiation.
@@ -390,7 +409,6 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
             # Compute the loss value for this minibatch.
             current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
-                                               losses.max_min_constraint(y_train_iteration, logits),
                                                parameters.uncertainty_weight * uncertainty,
                                                tf.math.reduce_mean(model.losses[::3]),
                                                parameters.l1_weight_activity * tf.math.reduce_mean(model.losses[1::3]),
@@ -399,10 +417,9 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
         loss_list.append(current_loss)
 
         if np.isnan(loss_list[-1].numpy()) or np.isinf(loss_list[-1].numpy()):
-            tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
-            current_loss_increase_patience = train_backup(model, optimiser, loss_list, previous_model_weight_list,
-                                                          previous_optimiser_weight_list,
-                                                          current_loss_increase_patience)
+            tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, current_loss_increase_patience = \
+                train_backup(model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list,
+                             current_loss_increase_patience)
 
             continue
 
@@ -414,18 +431,16 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
             loss_gradient = np.gradient(loss_list[-current_patience:])[-1]
 
-            if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=relative_plateau_cutoff):
+            if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=parameters.plateau_cutoff):
                 if not (loss_list[-1] * (parameters.backtracking_weight_percentage / 100.0) < loss_list[-2]):
                     if current_loss_increase_patience >= parameters.patience:
                         print("WARNING: Loss increased above threshold; patience reached, allowing anyway!")
 
                         break
                     else:
-                        tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, \
-                        current_loss_increase_patience = train_backup(model, optimiser, loss_list,
-                                                                      previous_model_weight_list,
-                                                                      previous_optimiser_weight_list,
-                                                                      current_loss_increase_patience)
+                        tape, model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list, current_loss_increase_patience = \
+                            train_backup(model, optimiser, loss_list, previous_model_weight_list,
+                                         previous_optimiser_weight_list, current_loss_increase_patience)
                 else:
                     break
             else:
@@ -457,13 +472,13 @@ def get_bayesian_test_prediction(model, x_train_iteration, bayesian_iteration, b
     for i in range(bayesian_iteration):
         x_prediction_list.append(model(x_train_iteration, training=bayesian_bool))
 
+        gc.collect()
+        k.backend.clear_session()
+
     x_prediction = tf.math.reduce_mean(x_prediction_list, axis=0)
 
     x_prediction_uncertainty_volume = tf.math.reduce_std(x_prediction_list, axis=0)
     x_prediction_uncertainty = tf.math.reduce_mean(x_prediction_uncertainty_volume)
-
-    gc.collect()
-    k.backend.clear_session()
 
     return x_prediction, x_prediction_uncertainty, x_prediction_uncertainty_volume
 
@@ -479,31 +494,57 @@ def test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss
 
     current_accuracy = losses.correlation_coefficient_accuracy(y_train_iteration, x_prediction)
 
-    return x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
-           current_accuracy
+    return x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, current_accuracy
+
+
+def test_backup(model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list):
+    print("train_backup")
+
+    print("WARNING: Accuracy has become NaN; backing up...")
+
+    if len(loss_list) > 1:
+        loss_list.pop()
+        previous_model_weight_list.pop()
+        previous_optimiser_weight_list.pop()
+
+    with open(previous_model_weight_list[-1], "rb") as file:
+        model.set_weights(pickle.load(file))
+
+    if len(previous_optimiser_weight_list) > 2:
+        with open(previous_optimiser_weight_list[-1], "rb") as file:
+            optimiser.set_weights(pickle.load(file))
+    else:
+        optimiser = architecture.get_optimiser()
+
+    if len(loss_list) > 1:
+        loss_list.pop()
+        previous_model_weight_list.pop()
+        previous_optimiser_weight_list.pop()
+
+    return model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list
 
 
 def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, x_prediction_uncertainty_volume,
-                              preprocessing_steps, data_max_min, window_input_shape, current_output_path, j):
+                              preprocessing_steps, data_min_maxes, window_input_shape, current_output_path, j):
     print("output_window_predictions")
 
-    x_prediction = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps, data_max_min)[0][0]
+    x_prediction, _, _ = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps, data_min_maxes)
     x_prediction = np.squeeze(preprocessing.data_downsampling([x_prediction], "numpy", window_input_shape)[0])
 
     x_prediction_uncertainty_volume = np.squeeze(preprocessing.data_downsampling([x_prediction_uncertainty_volume],
                                                                                  "numpy", window_input_shape)[0])
 
     if gt_prediction is not None:
-        gt_prediction = preprocessing.data_preprocessing([gt_prediction], "numpy", preprocessing_steps,
-                                                         data_max_min)[0][0]
+        gt_prediction, _, _ = preprocessing.data_preprocessing([gt_prediction], "numpy", preprocessing_steps,
+                                                               data_min_maxes)
         gt_prediction = np.squeeze(preprocessing.data_downsampling([gt_prediction], "numpy", window_input_shape)[0])
 
         gt_accuracy = losses.correlation_coefficient_accuracy(gt_prediction, x_prediction)
 
         print("Output accuracy:\t{0:<20}".format(str(gt_accuracy.numpy())))
     else:
-        y_train_iteration = preprocessing.data_preprocessing([y_train_iteration], "numpy", preprocessing_steps,
-                                                             data_max_min)[0][0]
+        y_train_iteration, _, _ = preprocessing.data_preprocessing([y_train_iteration], "numpy", preprocessing_steps,
+                                                                   data_min_maxes)
         y_train_iteration = np.squeeze(preprocessing.data_downsampling([y_train_iteration], "numpy",
                                                                        window_input_shape)[0])
 
@@ -586,24 +627,40 @@ def train_model():
     print("train_model")
 
     # get data and lables
-    x, y, preprocessing_steps, data_max_min, full_input_shape, windowed_full_input_axial_size, window_input_shape, \
-    gt = get_preprocessed_train_data()
+    x, y, preprocessing_steps, data_min_maxes, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = \
+        get_preprocessed_train_data()
 
-    data_shape = np.load(x[0])[0].shape
+    with gzip.GzipFile(x[0], "r") as file:
+        input_shape = np.load(file)[0].shape
 
-    model, optimiser, loss = architecture.get_model(data_shape)
+    model, optimiser, loss = architecture.get_model_all(input_shape)
     model.summary()
+
+    model_update_path = "{0}/model.pkl".format(parameters.model_path)
+
+    if os.path.exists(model_update_path):
+        print("Previous model found!")
+
+        with open(model_update_path, "rb") as file:
+            model.set_weights(pickle.load(file))
 
     print("Memory usage:\t{0}".format(str(get_model_memory_usage(1, model))))
 
     k.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
                        show_layer_names=True, expand_nested=True)
 
-    relative_plateau_cutoff = None
-
     for i in range(len(y)):
-        if parameters.new_model_patient_bool:
-            model, optimiser, loss = architecture.get_model(data_shape)
+        if parameters.new_model_patient_bool and not parameters.new_model_window_bool:
+            if os.path.exists(model_update_path):
+                print("Previous model found!")
+
+                with open(model_update_path, "rb") as file:
+                    model.set_weights(pickle.load(file))
+            else:
+                model = architecture.get_model(input_shape)
+
+        if parameters.new_optimiser_patient_bool and not parameters.new_optimiser_window_bool:
+            optimiser = architecture.get_optimiser()
 
         print("Patient/Time point:\t{0}".format(str(i)))
 
@@ -613,14 +670,24 @@ def train_model():
         if not os.path.exists(patient_output_path):
             os.makedirs(patient_output_path, mode=0o770)
 
-        number_of_windows = np.load(x[i]).shape[0]
+        with gzip.GzipFile(x[i], "r") as file:
+            number_of_windows = np.load(file).shape[0]
 
         current_window_data_paths = []
         current_window_uncertainty_data_paths = []
 
         for j in range(number_of_windows):
             if parameters.new_model_window_bool:
-                model, optimiser, loss = architecture.get_model(data_shape)
+                if os.path.exists(model_update_path):
+                    print("Previous model found!")
+
+                    with open(model_update_path, "rb") as file:
+                        model.set_weights(pickle.load(file))
+                else:
+                    model = architecture.get_model(input_shape)
+
+            if parameters.new_optimiser_window_bool:
+                optimiser = architecture.get_optimiser()
 
             print("Window:\t{0}".format(str(j)))
 
@@ -642,8 +709,11 @@ def train_model():
             if not os.path.exists(model_output_path):
                 os.makedirs(model_output_path, mode=0o770)
 
-            x_train_iteration = np.asarray([np.load(x[i])[j]])
-            y_train_iteration = np.asarray([np.load(y[i])[j]])
+            with gzip.GzipFile(x[i], "r") as file:
+                x_train_iteration = np.asarray([np.load(file)[j]])
+
+            with gzip.GzipFile(y[i], "r") as file:
+                y_train_iteration = np.asarray([np.load(file)[j]])
 
             if float_sixteen_bool:
                 x_train_iteration = x_train_iteration.astype(np.float16)
@@ -656,7 +726,8 @@ def train_model():
             y_train_iteration = tf.convert_to_tensor(y_train_iteration)
 
             if gt is not None:
-                gt_prediction = tf.convert_to_tensor([np.load(gt[i])[j]])
+                with gzip.GzipFile(gt[i], "r") as file:
+                    gt_prediction = tf.convert_to_tensor([np.load(file)[j]])
             else:
                 gt_prediction = None
 
@@ -667,11 +738,7 @@ def train_model():
             previous_model_weight_list = []
             previous_optimiser_weight_list = []
 
-            if relative_plateau_cutoff is None:
-                x_prediction, relative_plateau_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
-                current_accuracy = test_step(model, loss, x_train_iteration, y_train_iteration, [])
-
-                relative_plateau_cutoff = parameters.plateau_cutoff * relative_plateau_loss_list[-1].numpy()
+            current_accuracy_nan_patience = 0
 
             gt_accuracy = None
             max_accuracy = tf.cast(0.0, dtype=tf.float32)
@@ -679,22 +746,49 @@ def train_model():
 
             x_output = None
             y_output = None
+            x_prediction_uncertainty_volume = None
 
             while True:
+                if current_accuracy_nan_patience >= parameters.patience:
+                    break
+
                 print("Iteration:\t{0:<20}\tTotal iterations:\t{1:<20}".format(str(len(loss_list)), str(total_iterations)))
 
                 model, loss_list, uncertainty, previous_model_weight_list, previous_optimiser_weight_list = \
                     train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, loss_list,
-                               previous_model_weight_list, previous_optimiser_weight_list, relative_plateau_cutoff,
+                               previous_model_weight_list, previous_optimiser_weight_list,
                                model_output_path)
 
-                x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, \
-                current_accuracy = test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss_list)
+                x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, current_accuracy = \
+                    test_step(model, loss, x_train_iteration, y_train_iteration, evaluation_loss_list)
+
+                if np.isnan(current_accuracy.numpy()) or np.isinf(current_accuracy.numpy()):
+                    model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list = \
+                        test_backup(model, optimiser, loss_list, previous_model_weight_list,
+                                    previous_optimiser_weight_list)
+
+                    current_accuracy_nan_patience = current_accuracy_nan_patience + 1
+
+                    continue
+                else:
+                    if gt is None:
+                        current_accuracy_nan_patience = 0
 
                 print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}\tUncertainty:\t{2:<20}".format(str(loss_list[-1].numpy()), str(current_accuracy.numpy()), str(uncertainty.numpy())))
 
                 if gt is not None:
                     gt_accuracy = losses.correlation_coefficient_accuracy(gt_prediction, x_prediction)
+
+                    if np.isnan(gt_accuracy.numpy()) or np.isinf(gt_accuracy.numpy()):
+                        model, optimiser, loss_list, previous_model_weight_list, previous_optimiser_weight_list = \
+                            test_backup(model, optimiser, loss_list, previous_model_weight_list,
+                                        previous_optimiser_weight_list)
+
+                        current_accuracy_nan_patience = current_accuracy_nan_patience + 1
+
+                        continue
+                    else:
+                        current_accuracy_nan_patience = 0
 
                     if max_accuracy < gt_accuracy:
                         max_accuracy = gt_accuracy
@@ -778,14 +872,9 @@ def train_model():
 
                     loss_gradient = np.gradient(evaluation_loss_list[-current_patience:])[-parameters.patience:]
 
-                    current_plateau_cutoff = parameters.plateau_cutoff
+                    print("Plateau cutoff:\t{0:<20}\tMax distance to plateau cutoff:\t{1:<20}".format(str(parameters.plateau_cutoff), str(np.max(np.abs(loss_gradient) - parameters.plateau_cutoff))))
 
-                    if parameters.relative_plateau_cutoff_bool:
-                        current_plateau_cutoff = relative_plateau_cutoff
-
-                    print("Plateau cutoff:\t{0:<20}\tMax distance to plateau cutoff:\t{1:<20}".format(str(current_plateau_cutoff), str(np.max(np.abs(loss_gradient) - current_plateau_cutoff))))
-
-                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=current_plateau_cutoff):
+                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=parameters.plateau_cutoff):
                         print("Reached plateau: Exiting...")
                         print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy.numpy()), str(max_accuracy_iteration)))
 
@@ -800,6 +889,11 @@ def train_model():
 
                 total_iterations = total_iterations + 1
 
+            if current_accuracy_nan_patience >= parameters.patience:
+                print("Error: Input not suitable; continuing")
+
+                continue
+
             if parameters.bayesian_test_bool != parameters.bayesian_output_bool:
                 x_prediction, x_prediction_uncertainty, x_prediction_uncertainty_volume = \
                     get_bayesian_test_prediction(model, x_train_iteration, parameters.bayesian_iterations,
@@ -810,18 +904,43 @@ def train_model():
             current_window_data_path, current_window_uncertainty_data_path = \
                 output_window_predictions(x_output, y_output, gt_prediction.numpy(),
                                           np.squeeze(x_prediction_uncertainty_volume.numpy()).astype(np.float64),
-                                          preprocessing_steps, data_max_min, window_input_shape, window_output_path, j)
+                                          preprocessing_steps, data_min_maxes, window_input_shape, window_output_path,
+                                          j)
 
             current_window_data_paths.append(current_window_data_path)
             current_window_uncertainty_data_paths.append(current_window_uncertainty_data_path)
 
-        output_patient_time_point_predictions(current_window_data_paths,
-                                              windowed_full_input_axial_size,
-                                              full_input_shape, patient_output_path, "output", i)
+            if parameters.new_model_window_bool:
+                with open("{0}/model.pkl".format(window_output_path), "wb") as file:
+                    pickle.dump(model.get_weights(), file)
 
-        output_patient_time_point_predictions(current_window_uncertainty_data_paths,
-                                              windowed_full_input_axial_size,
-                                              full_input_shape, patient_output_path, "uncertainty", i)
+                with open("{0}/optimiser.pkl".format(window_output_path), "wb") as file:
+                    pickle.dump(optimiser.get_weights(), file)
+
+        try:
+            output_patient_time_point_predictions(current_window_data_paths,
+                                                  windowed_full_input_axial_size,
+                                                  full_input_shape, patient_output_path, "output", i)
+
+            output_patient_time_point_predictions(current_window_uncertainty_data_paths,
+                                                  windowed_full_input_axial_size,
+                                                  full_input_shape, patient_output_path, "uncertainty", i)
+
+            if parameters.new_model_patient_bool and not parameters.new_model_window_bool:
+                with open("{0}/model.pkl".format(patient_output_path), "wb") as file:
+                    pickle.dump(model.get_weights(), file)
+
+                with open("{0}/optimiser.pkl".format(patient_output_path), "wb") as file:
+                    pickle.dump(optimiser.get_weights(), file)
+        except:
+            print("Error: Input not suitable; continuing")
+
+    if not parameters.new_model_patient_bool and not parameters.new_model_window_bool:
+        with open("{0}/model.pkl".format(output_path), "wb") as file:
+            pickle.dump(model.get_weights(), file)
+
+        with open("{0}/optimiser.pkl".format(output_path), "wb") as file:
+            pickle.dump(optimiser.get_weights(), file)
 
 
 def main():
@@ -846,8 +965,8 @@ def main():
 
     train_model()
 
-    import python_email_notification
-    python_email_notification.main()
+    # import python_email_notification
+    # python_email_notification.main()
 
     transcript.stop()
 

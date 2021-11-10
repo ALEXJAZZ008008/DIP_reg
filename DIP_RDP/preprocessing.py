@@ -48,7 +48,8 @@ def data_upsample(data, data_type, new_resolution=None):
 
     for i in range(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i])
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -101,9 +102,9 @@ def data_upsample(data, data_type, new_resolution=None):
             else:
                 dimension_z_upscale_factor = 1.0
 
-        if not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                not np.isclose(dimension_z_upscale_factor, 1.0, rtol=0.0, atol=1e-05):
+        if (not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or
+                not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or
+                not np.isclose(dimension_z_upscale_factor, 1.0, rtol=0.0, atol=1e-05)):
             data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_upscale_factor, dimension_y_upscale_factor,
                                                        dimension_z_upscale_factor), order=1, mode="mirror",
                                            prefilter=True)
@@ -151,7 +152,8 @@ def data_downsampling(data, data_type, new_resolution=None):
 
     for i in range(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i])
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -208,9 +210,9 @@ def data_downsampling(data, data_type, new_resolution=None):
             dimension_y_downscale_factor = data_copy_shape[2] / data_copy.shape[2]
             dimension_z_downscale_factor = data_copy_shape[3] / data_copy.shape[3]
 
-        if not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-05):
+        if (not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-05) or
+                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-05) or
+                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-05)):
             data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_downscale_factor, dimension_y_downscale_factor,
                                                        dimension_z_downscale_factor), order=1, mode="mirror",
                                            prefilter=True)
@@ -227,7 +229,7 @@ def data_downsampling(data, data_type, new_resolution=None):
     return data
 
 
-def data_preprocessing(data, data_type, preprocessing_steps=None, data_max_min=None):
+def data_preprocessing(data, data_type, preprocessing_steps=None, data_min_maxes=None):
     print("data_preprocessing")
 
     if preprocessing_steps is None:
@@ -236,15 +238,16 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_max_min=N
         for _ in range(len(data)):
             preprocessing_steps.append(None)
 
-    if data_max_min is None:
-        data_max_min = []
+    if data_min_maxes is None:
+        data_min_maxes = []
 
         for _ in range(len(data)):
-            data_max_min.append(None)
+            data_min_maxes.append(None)
 
     for i in range(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i])
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -254,19 +257,19 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_max_min=N
         data_copy_shape = data_copy.shape
         data_copy = data_copy.reshape(-1, 1)
 
-        data_copy_max_min = []
+        data_copy_background_array = \
+            np.isclose(data_copy, scipy.stats.mode(data_copy, axis=None, nan_policy="omit")[0][0], rtol=0.0, atol=1e-04)
 
         if preprocessing_steps[i] is None:
             current_preprocessing_steps = [StandardScaler(copy=False)]
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
 
             current_preprocessing_steps.append(PowerTransformer(standardize=False, copy=False))
-            data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
+            data_copy[np.logical_not(data_copy_background_array)[:, 0]] = \
+                current_preprocessing_steps[-1].fit_transform(
+                    data_copy[np.logical_not(data_copy_background_array)[:, 0]])
 
-            data_copy_max_min.append(np.max(data_copy))
-            data_copy_max_min.append(np.min(data_copy))
-
-            data_max_min[i] = data_copy_max_min
+            data_min_maxes[i] = (np.min(data_copy), np.max(data_copy))
 
             current_preprocessing_steps.append(StandardScaler(copy=False))
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
@@ -275,14 +278,13 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_max_min=N
         else:
             data_copy = preprocessing_steps[i][2].inverse_transform(data_copy)
 
-            data_copy = np.clip(data_copy, data_max_min[i][1], data_max_min[i][0])
-            data_copy = preprocessing_steps[i][1].inverse_transform(data_copy)
+            data_copy = np.clip(data_copy, data_min_maxes[i][0], data_min_maxes[i][1])
+            data_copy[np.logical_not(data_copy_background_array)[:, 0]] = \
+                preprocessing_steps[i][1].inverse_transform(data_copy[np.logical_not(data_copy_background_array)[:, 0]])
 
             data_copy = preprocessing_steps[i][0].inverse_transform(data_copy)
 
-            data_copy_background = scipy.stats.mode(data_copy, axis=None, nan_policy="omit")[0][0]
-            data_copy[data_copy < data_copy_background] = data_copy_background
-            data_copy = data_copy - data_copy_background
+            data_copy = data_copy - scipy.stats.mode(data_copy, axis=None, nan_policy="omit")[0][0]
 
         data_copy = data_copy.reshape(data_copy_shape)
 
@@ -293,4 +295,4 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_max_min=N
             if data_type == "numpy":
                 data[i] = data_copy
 
-    return data, preprocessing_steps, data_max_min
+    return data, preprocessing_steps, data_min_maxes
