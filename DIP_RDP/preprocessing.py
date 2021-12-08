@@ -4,10 +4,11 @@
 
 
 import math
+import random
 import numpy as np
-import scipy.stats
-import scipy.ndimage
-from sklearn.preprocessing import StandardScaler, PowerTransformer
+from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
+import elasticdeform
 import gzip
 
 
@@ -62,20 +63,20 @@ def data_upsample(data, data_type, new_resolution=None):
             data_copy = np.expand_dims(data_copy, 0)
 
         if new_resolution is not None:
-            if (new_resolution[0] % 2) != (data_copy.shape[1] % 2):
-                dimension_x_upscale_factor = (data_copy.shape[1] + 1.0) / data_copy.shape[1]
+            if data_copy.shape[1] % 2.0 != new_resolution[0] % 2.0:
+                dimension_x_pad_factor = 1
             else:
-                dimension_x_upscale_factor = 1.0
+                dimension_x_pad_factor = 0
 
-            if (new_resolution[1] % 2) != (data_copy.shape[2] % 2):
-                dimension_y_upscale_factor = (data_copy.shape[2] + 1.0) / data_copy.shape[2]
+            if data_copy.shape[2] % 2.0 != new_resolution[1] % 2.0:
+                dimension_y_pad_factor = 1
             else:
-                dimension_y_upscale_factor = 1.0
+                dimension_y_pad_factor = 0
 
-            if (new_resolution[2] % 2) != (data_copy.shape[3] % 2):
-                dimension_z_upscale_factor = (data_copy.shape[3] + 1.0) / data_copy.shape[3]
+            if data_copy.shape[3] % 2.0 != new_resolution[2] % 2.0:
+                dimension_z_pad_factor = 1
             else:
-                dimension_z_upscale_factor = 1.0
+                dimension_z_pad_factor = 0
         else:
             data_copy_shape = list(data_copy.shape)
 
@@ -83,31 +84,27 @@ def data_upsample(data, data_type, new_resolution=None):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
-            data_copy_shape = [1, get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
-                               get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
-                               get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
-
-            if (data_copy_shape[1] % 2) != (data_copy.shape[1] % 2):
-                dimension_x_upscale_factor = (data_copy.shape[1] + 1.0) / data_copy.shape[1]
+            if (data_copy.shape[1] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of) % 2.0):
+                dimension_x_pad_factor = 1
             else:
-                dimension_x_upscale_factor = 1.0
+                dimension_x_pad_factor = 0
 
-            if (data_copy_shape[2] % 2) != (data_copy.shape[2] % 2):
-                dimension_y_upscale_factor = (data_copy.shape[2] + 1.0) / data_copy.shape[2]
+            if (data_copy.shape[2] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of) % 2.0):
+                dimension_y_pad_factor = 1
             else:
-                dimension_y_upscale_factor = 1.0
+                dimension_y_pad_factor = 0
 
-            if (data_copy_shape[3] % 2) != (data_copy.shape[3] % 2):
-                dimension_z_upscale_factor = (data_copy.shape[3] + 1.0) / data_copy.shape[3]
+            if (data_copy.shape[3] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of) % 2.0):
+                dimension_z_pad_factor = 1
             else:
-                dimension_z_upscale_factor = 1.0
+                dimension_z_pad_factor = 0
 
-        if (not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or
-                not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or
-                not np.isclose(dimension_z_upscale_factor, 1.0, rtol=0.0, atol=1e-05)):
-            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_upscale_factor, dimension_y_upscale_factor,
-                                                       dimension_z_upscale_factor), order=1, mode="mirror",
-                                           prefilter=True)
+        if dimension_x_pad_factor != 0 or dimension_y_pad_factor != 0 or dimension_z_pad_factor != 0:
+            data_copy = np.pad(data_copy, ((0, 0), (dimension_x_pad_factor, 0), (dimension_y_pad_factor, 0),
+                                           (dimension_z_pad_factor, 0)), mode="reflect")
 
         if new_resolution is not None:
             dimension_x_pad_factor = int((new_resolution[0] - data_copy.shape[1]) / 2.0)
@@ -192,9 +189,20 @@ def data_downsampling(data, data_type, new_resolution=None):
                         dimension_z_crop_factor or None:-dimension_z_crop_factor or None]
 
         if new_resolution is not None:
-            dimension_x_downscale_factor = new_resolution[0] / data_copy.shape[1]
-            dimension_y_downscale_factor = new_resolution[1] / data_copy.shape[2]
-            dimension_z_downscale_factor = new_resolution[2] / data_copy.shape[3]
+            if data_copy.shape[1] % 2.0 != new_resolution[0] % 2.0:
+                dimension_x_crop_factor = 1
+            else:
+                dimension_x_crop_factor = 0
+
+            if data_copy.shape[2] % 2.0 != new_resolution[1] % 2.0:
+                dimension_y_crop_factor = 1
+            else:
+                dimension_y_crop_factor = 0
+
+            if data_copy.shape[3] % 2.0 != new_resolution[2] % 2.0:
+                dimension_z_crop_factor = 1
+            else:
+                dimension_z_crop_factor = 0
         else:
             data_copy_shape = list(data_copy.shape)
 
@@ -202,20 +210,27 @@ def data_downsampling(data, data_type, new_resolution=None):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
-            data_copy_shape = [1, get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
-                               get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
-                               get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+            if (data_copy.shape[1] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of) % 2.0):
+                dimension_x_crop_factor = 1
+            else:
+                dimension_x_crop_factor = 0
 
-            dimension_x_downscale_factor = data_copy_shape[1] / data_copy.shape[1]
-            dimension_y_downscale_factor = data_copy_shape[2] / data_copy.shape[2]
-            dimension_z_downscale_factor = data_copy_shape[3] / data_copy.shape[3]
+            if (data_copy.shape[2] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of) % 2.0):
+                dimension_y_crop_factor = 1
+            else:
+                dimension_y_crop_factor = 0
 
-        if (not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-05) or
-                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-05) or
-                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-05)):
-            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_downscale_factor, dimension_y_downscale_factor,
-                                                       dimension_z_downscale_factor), order=1, mode="mirror",
-                                           prefilter=True)
+            if (data_copy.shape[3] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of) % 2.0):
+                dimension_z_crop_factor = 1
+            else:
+                dimension_z_crop_factor = 0
+
+        if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
+            data_copy = data_copy[:, dimension_x_crop_factor or None:, dimension_y_crop_factor or None:,
+                        dimension_z_crop_factor or None:]
 
         data_copy = np.expand_dims(data_copy, -1)
 
@@ -229,7 +244,7 @@ def data_downsampling(data, data_type, new_resolution=None):
     return data
 
 
-def data_preprocessing(data, data_type, preprocessing_steps=None, data_min_maxes=None):
+def data_preprocessing(data, data_type, preprocessing_steps=None):
     print("data_preprocessing")
 
     if preprocessing_steps is None:
@@ -237,12 +252,6 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_min_maxes
 
         for _ in range(len(data)):
             preprocessing_steps.append(None)
-
-    if data_min_maxes is None:
-        data_min_maxes = []
-
-        for _ in range(len(data)):
-            data_min_maxes.append(None)
 
     for i in range(len(data)):
         if data_type == "path":
@@ -257,34 +266,13 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_min_maxes
         data_copy_shape = data_copy.shape
         data_copy = data_copy.reshape(-1, 1)
 
-        data_copy_background_array = \
-            np.isclose(data_copy, scipy.stats.mode(data_copy, axis=None, nan_policy="omit")[0][0], rtol=0.0, atol=1e-04)
-
         if preprocessing_steps[i] is None:
             current_preprocessing_steps = [StandardScaler(copy=False)]
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
 
-            current_preprocessing_steps.append(PowerTransformer(standardize=False, copy=False))
-            data_copy[np.logical_not(data_copy_background_array)[:, 0]] = \
-                current_preprocessing_steps[-1].fit_transform(
-                    data_copy[np.logical_not(data_copy_background_array)[:, 0]])
-
-            data_min_maxes[i] = (np.min(data_copy), np.max(data_copy))
-
-            current_preprocessing_steps.append(StandardScaler(copy=False))
-            data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
-
             preprocessing_steps[i] = current_preprocessing_steps
         else:
-            data_copy = preprocessing_steps[i][2].inverse_transform(data_copy)
-
-            data_copy = np.clip(data_copy, data_min_maxes[i][0], data_min_maxes[i][1])
-            data_copy[np.logical_not(data_copy_background_array)[:, 0]] = \
-                preprocessing_steps[i][1].inverse_transform(data_copy[np.logical_not(data_copy_background_array)[:, 0]])
-
             data_copy = preprocessing_steps[i][0].inverse_transform(data_copy)
-
-            data_copy = data_copy - scipy.stats.mode(data_copy, axis=None, nan_policy="omit")[0][0]
 
         data_copy = data_copy.reshape(data_copy_shape)
 
@@ -295,4 +283,107 @@ def data_preprocessing(data, data_type, preprocessing_steps=None, data_min_maxes
             if data_type == "numpy":
                 data[i] = data_copy
 
-    return data, preprocessing_steps, data_min_maxes
+    return data, preprocessing_steps
+
+
+def introduce_jitter(x_train_iteration, y_train_iteration):
+    print("introduce_jitter")
+
+    x_train_iteration_jitter = x_train_iteration.numpy().astype(np.float64)
+    y_train_iteration_jitter = y_train_iteration.numpy().astype(np.float64)
+
+    if parameters.jitter_magnitude > 0:
+        x_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
+        y_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
+        z_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
+
+        if x_jitter < 0 or x_jitter > 0:
+            if x_jitter > 0:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, x_jitter:, :, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, x_jitter:, :, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
+                                                  mode="reflect")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
+                                                  mode="reflect")
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :x_jitter, :, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :x_jitter, :, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
+                                                  mode="reflect")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
+                                                  mode="reflect")
+
+        if y_jitter < 0 or y_jitter > 0:
+            if y_jitter > 0:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, y_jitter:, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, y_jitter:, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
+                                                  mode="reflect")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
+                                                  mode="reflect")
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, :y_jitter, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, :y_jitter, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
+                                                  mode="reflect")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
+                                                  mode="reflect")
+
+        if z_jitter < 0 or z_jitter > 0:
+            if z_jitter > 0:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, z_jitter:, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, z_jitter:, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
+                                                  mode="reflect")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
+                                                  mode="reflect")
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, :z_jitter, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, :z_jitter, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
+                                                  mode="reflect")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
+                                                  mode="reflect")
+
+    if parameters.elastic_jitter_bool:
+        if parameters.elastic_jitter_sigma > 0.0:
+            points = np.asarray(x_train_iteration.shape.as_list())
+
+            for i in range(parameters.elastic_jitter_points_iterations):
+                points = np.ceil(points / 2.0)
+
+            points = points.astype(np.int).tolist()
+
+            [x_train_iteration_jitter, y_train_iteration_jitter] = \
+                elasticdeform.deform_random_grid([x_train_iteration_jitter, y_train_iteration_jitter],
+                                                 sigma=parameters.jitter_sigma, points=points, mode="reflect")  # noqa
+
+            if main.float_sixteen_bool:
+                x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float16)
+                y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float16)
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float32)
+                y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float32)
+
+    x_train_iteration_jitter = tf.convert_to_tensor(x_train_iteration_jitter)
+    y_train_iteration_jitter = tf.convert_to_tensor(y_train_iteration_jitter)
+
+    return x_train_iteration_jitter, y_train_iteration_jitter

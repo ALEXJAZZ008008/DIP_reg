@@ -176,9 +176,9 @@ def get_convolution_layer(x, depth, size, stride, groups):
                         bias_initializer=k.initializers.Constant(0.0),
                         kernel_regularizer=losses.l2_regulariser)(x)
     x = get_channel_shuffle(x, groups)
-    x = tfa.layers.GroupNormalization(groups=groups)(x)
+    x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.0),
+    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(1.0),
                        alpha_regularizer=losses.log_cosh_regulariser,
                        shared_axes=[1, 2, 3])(x)
     x = ActivityRegularization()(x)
@@ -200,9 +200,9 @@ def get_transpose_convolution_layer(x, depth, size, stride, groups):
                                         bias_initializer=k.initializers.Constant(0.0),
                                         kernel_regularizer=losses.l2_regulariser)(x)
     x = get_channel_shuffle(x, groups)
-    x = tfa.layers.GroupNormalization(groups=groups)(x)
+    x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(0.0),
+    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(1.0),
                        alpha_regularizer=losses.log_cosh_regulariser,
                        shared_axes=[1, 2, 3])(x)
     x = ActivityRegularization()(x)

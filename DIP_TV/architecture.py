@@ -5,7 +5,6 @@
 
 import tensorflow as tf
 import tensorflow.keras as k
-from tqdm import trange
 
 
 import main
@@ -38,8 +37,8 @@ def get_encoder(x):
 
     res_connections = []
 
-    for i in trange(len(layer_layers)):
-        for _ in trange(layer_layers[i]):
+    for i in range(len(layer_layers)):
+        for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
         res_connections.append(x)
@@ -57,8 +56,8 @@ def get_latent(x):
     layer_kernel_size = [(3, 3, 3)]
     layer_groups = [1]
 
-    for i in trange(len(layer_layers)):
-        for _ in trange(layer_layers[i]):
+    for i in range(len(layer_layers)):
+        for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
     return x
@@ -73,7 +72,7 @@ def get_decoder(x, res_connections):
     layer_stride = [(2, 2, 2), (2, 2, 2), (2, 2, 2)]
     layer_groups = [1, 1, 1]
 
-    for i in trange(len(layer_depth)):
+    for i in range(len(layer_depth)):
         x = k.layers.Conv3DTranspose(filters=layer_depth[i],
                                      kernel_size=layer_kernel_size[i],
                                      strides=(1, 1, 1),
@@ -88,7 +87,7 @@ def get_decoder(x, res_connections):
         res_connections_x = res_connections.pop()
         x = k.layers.Add()([x, res_connections_x])
 
-        for _ in trange(layer_layers[i]):
+        for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
     # output

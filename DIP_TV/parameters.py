@@ -4,7 +4,7 @@
 
 
 data_window_size = 64
-data_window_bool = False
+data_window_bool = True
 
 
 total_variation_bool = True

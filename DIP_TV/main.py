@@ -60,8 +60,8 @@ else:
     policy = k.mixed_precision.Policy(tf.dtypes.float32.name)
     k.mixed_precision.set_global_policy(policy)
 
-data_path = "{0}/DIP_RDP_data/xcat/".format(os.path.dirname(os.getcwd()))
-output_path = "{0}/output".format(os.getcwd())
+data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
+output_path = "{0}/output/DIP_TV/".format(os.getcwd())
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -362,7 +362,8 @@ def train_model():
         if not os.path.exists(patient_output_path):
             os.makedirs(patient_output_path, mode=0o770)
 
-        number_of_windows = np.load(x[i], allow_pickle=True).shape[0]
+        with gzip.GzipFile(x[i], "r") as file:
+            number_of_windows = np.load(file).shape[0]
 
         current_window_data_paths = []
 
@@ -381,7 +382,8 @@ def train_model():
             if not os.path.exists(plot_output_path):
                 os.makedirs(plot_output_path, mode=0o770)
 
-            data_shape = np.load(x[i], allow_pickle=True)[j].shape
+            with gzip.GzipFile(x[i], "r") as file:
+                data_shape = np.load(file)[j].shape
 
             model = architecture.get_model(data_shape)
             model.summary()
@@ -391,8 +393,11 @@ def train_model():
             k.utils.plot_model(model, to_file="{0}/model.pdf".format(window_output_path), show_shapes=True,
                                show_dtype=True, show_layer_names=True, expand_nested=True)
 
-            x_train_iteration = np.asarray([np.load(x[i], allow_pickle=True)[j]])
-            y_train_iteration = np.asarray([np.load(y[i], allow_pickle=True)[j]])
+            with gzip.GzipFile(x[i], "r") as file:
+                x_train_iteration = np.asarray([np.load(file)[j]])
+
+            with gzip.GzipFile(y[i], "r") as file:
+                y_train_iteration = np.asarray([np.load(file)[j]])
 
             if float_sixteen_bool:
                 x_train_iteration = x_train_iteration.astype(np.float16)
@@ -402,7 +407,8 @@ def train_model():
                 y_train_iteration = y_train_iteration.astype(np.float32)
 
             if gt is not None:
-                gt_prediction = np.asarray([np.load(gt[i], allow_pickle=True)[j]])
+                with gzip.GzipFile(gt[i], "r") as file:
+                    gt_prediction = np.asarray([np.load(file)[j]])
             else:
                 gt_prediction = None
 

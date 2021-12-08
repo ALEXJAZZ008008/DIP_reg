@@ -37,7 +37,8 @@ def data_upsample(data, data_type, new_resolution=None):
 
     for i in range(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i], allow_pickle=True)
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
@@ -94,7 +95,8 @@ def data_preprocessing(data, data_type, scalers=None):
 
     for i in range(len(data)):
         if data_type == "path":
-            data_copy = np.load(data[i], allow_pickle=True)
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
         else:
             if data_type == "numpy":
                 data_copy = data[i].copy()
