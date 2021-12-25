@@ -153,12 +153,6 @@ def log_cosh_regulariser(weight_matrix):
     return tf.math.reduce_mean(_log_cosh(weight_matrix))
 
 
-def l2_regulariser(weight_matrix):
-    weight_matrix = tf.cast(weight_matrix, dtype=tf.float32)
-
-    return parameters.l2_weight * tf.math.reduce_mean(tf.math.square(weight_matrix))
-
-
 def correlation_coefficient_loss(y_true, y_pred):
     def _correlation_coefficient(xm, ym):
         return 1.0 - tf.math.square(tf.math.maximum(tf.math.minimum(
@@ -173,3 +167,13 @@ def correlation_coefficient_loss(y_true, y_pred):
 
 def correlation_coefficient_accuracy(y_true, y_pred):
     return (correlation_coefficient_loss(y_true, y_pred) * -1.0) + 1.0
+
+
+def scale_accuracy(y_true, y_pred):
+    def _scale_accuracy(_y_true, _y_pred):
+        return 1.0 - tf.math.erf(tf.math.abs(_y_pred - _y_true) / tf.math.abs(_y_true))
+
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
+
+    return _scale_accuracy(tf.math.reduce_mean(y_true), tf.math.reduce_mean(y_pred))

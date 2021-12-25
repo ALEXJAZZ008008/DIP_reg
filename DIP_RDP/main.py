@@ -14,6 +14,7 @@ import scipy.stats
 import scipy.ndimage
 import tensorflow as tf
 import tensorflow.keras as k
+from numba import cuda
 import pickle
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -48,13 +49,15 @@ if reproducible_bool:
 else:
     random.seed()
 
-physical_devices = tf.config.list_physical_devices("GPU")
+device = cuda.get_current_device()
 
-try:
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
-except:
+# physical_devices = tf.config.list_physical_devices("GPU")
+
+# try:
+#     tf.config.experimental.set_memory_growth(physical_devices[0], True)
+# except:
     # Invalid device or cannot modify virtual devices once initialized.
-    pass
+#     pass
 
 float_sixteen_bool = True  # set the network to use float16 data
 cpu_bool = False  # if using CPU, set to true: disables mixed precision computation
@@ -178,6 +181,34 @@ def get_train_data():
     else:
         data_mask = None
 
+    loss_mask_path = "{0}/loss_mask/".format(data_path)
+
+    loss_mask_train_output_path = "{0}/loss_mask_train".format(output_path)
+
+    if not os.path.exists(loss_mask_train_output_path):
+        os.makedirs(loss_mask_train_output_path, mode=0o770)
+
+    if os.path.exists(loss_mask_path):
+        loss_mask = []
+
+        loss_mask_files = os.listdir(loss_mask_path)
+        loss_mask_files.sort(key=human_sorting)
+        loss_mask_files = ["{0}{1}".format(loss_mask_path, s) for s in loss_mask_files]
+
+        for i in range(len(loss_mask_files)):
+            current_array = nib.load(loss_mask_files[i]).get_data()
+
+            current_array, _ = get_data_windows(current_array)
+
+            current_loss_mask_train_path = "{0}/{1}.npy.gz".format(loss_mask_train_output_path, str(i))
+
+            with gzip.GzipFile(current_loss_mask_train_path, "w") as file:
+                np.save(file, current_array)
+
+            loss_mask.append(current_loss_mask_train_path)
+    else:
+        loss_mask = None
+
     y_path = "{0}/y/".format(data_path)
 
     y_files = os.listdir(y_path)
@@ -227,18 +258,18 @@ def get_train_data():
 
         if parameters.data_input_bool:
             if parameters.data_gaussian_smooth_sigma_xy > 0.0 or parameters.data_gaussian_smooth_sigma_z > 0.0:
+                if loss_mask is not None:
+                    with gzip.GzipFile(loss_mask[i], "r") as file:
+                        current_loss_mask = np.load(file)
+
+                    current_array = current_array * current_loss_mask
+
                 current_array = scipy.ndimage.gaussian_filter(current_array,
                                                               sigma=(0.0,
                                                                      parameters.data_gaussian_smooth_sigma_xy,
                                                                      parameters.data_gaussian_smooth_sigma_xy,
                                                                      parameters.data_gaussian_smooth_sigma_z),
                                                               mode="mirror")
-
-                if data_mask is not None:
-                    with gzip.GzipFile(data_mask[i], "r") as file:
-                        current_data_mask = np.load(file)
-
-                    current_array = current_array * current_data_mask
 
                 current_array, _ = preprocessing.data_preprocessing(current_array, "numpy")
         else:
@@ -263,7 +294,19 @@ def get_train_data():
                         with gzip.GzipFile(data_mask[i], "r") as file:
                             current_data_mask = np.load(file)
 
-                        gaussian_noise = gaussian_noise * current_data_mask
+                        data_mask_gaussian_noise = gaussian_noise * current_data_mask
+                    else:
+                        data_mask_gaussian_noise = gaussian_noise
+
+                    if loss_mask is not None:
+                        with gzip.GzipFile(loss_mask[i], "r") as file:
+                            current_loss_mask = np.load(file)
+
+                        loss_mask_current_array = gaussian_noise * ((current_loss_mask * -1.0) + 1.0)
+                    else:
+                        loss_mask_current_array = 0.0
+
+                    gaussian_noise = data_mask_gaussian_noise + loss_mask_current_array
 
                     gaussian_update_path = "{0}/gaussian.npy.gk".format(parameters.output_path)
 
@@ -279,8 +322,6 @@ def get_train_data():
             np.save(file, current_array)
 
         x.append(current_x_train_path)
-
-    y = np.asarray(y)
 
     gt_path = "{0}/gt/".format(data_path)
 
@@ -318,24 +359,12 @@ def get_train_data():
     else:
         gt = None
 
-    loss_mask_path = "{0}/loss_mask/".format(data_path)
+    if loss_mask is None:
+        loss_mask = []
 
-    loss_mask = []
-
-    if os.path.exists(loss_mask_path):
-        loss_mask_files = os.listdir(loss_mask_path)
-        loss_mask_files.sort(key=human_sorting)
-        loss_mask_files = ["{0}{1}".format(loss_mask_path, s) for s in loss_mask_files]
-
-        loss_mask_train_output_path = "{0}/loss_mask_train".format(output_path)
-
-        if not os.path.exists(loss_mask_train_output_path):
-            os.makedirs(loss_mask_train_output_path, mode=0o770)
-
-        for i in range(len(loss_mask_files)):
-            current_array = nib.load(loss_mask_files[i]).get_data()
-
-            current_array, _ = get_data_windows(current_array)
+        for i in range(len(y_files)):
+            with gzip.GzipFile(y[i], "r") as file:
+                current_array = np.ones(np.load(file).shape)
 
             current_loss_mask_train_path = "{0}/{1}.npy.gz".format(loss_mask_train_output_path, str(i))
 
@@ -343,11 +372,6 @@ def get_train_data():
                 np.save(file, current_array)
 
             loss_mask.append(current_loss_mask_train_path)
-    else:
-        for i in range(len(y_files)):
-            loss_mask.append(np.ones(y[i].shape))
-
-    loss_mask = np.asarray(loss_mask)
 
     return x, y, full_current_shape, windowed_full_input_axial_size, current_shape, gt, data_mask, loss_mask
 
@@ -453,10 +477,10 @@ def train_backup(model, optimiser, loss_list, previous_model_weight_list, previo
     with open(previous_model_weight_list[-1], "rb") as file:
         model.set_weights(pickle.load(file))
 
-    if len(previous_optimiser_weight_list) > 1:
+    try:
         with open(previous_optimiser_weight_list[-1], "rb") as file:
             optimiser.set_weights(pickle.load(file))
-    else:
+    except:
         optimiser = architecture.get_optimiser()
 
     current_loss_increase_patience = current_loss_increase_patience + 1
@@ -484,8 +508,8 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
         with open(previous_optimiser_weight_list[-1], "wb") as file:
             pickle.dump(optimiser.get_weights(), file)
 
-        x_train_iteration_jitter, y_train_iteration_jitter = \
-            preprocessing.introduce_jitter(x_train_iteration, y_train_iteration)
+        x_train_iteration_jitter, y_train_iteration_jitter, loss_mask_train_iteration = \
+            preprocessing.introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_iteration)
 
         # Open a GradientTape to record the operations run
         # during the forward pass, which enables auto-differentiation.
@@ -498,14 +522,21 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
             # on the GradientTape.
             logits, uncertainty = get_bayesian_train_prediction(model, x_train_iteration_jitter)  # Logits for this minibatch
 
+            current_y_train_iteration = y_train_iteration * loss_mask_train_iteration
             logits = logits * loss_mask_train_iteration
 
             # Compute the loss value for this minibatch.
-            current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
+            current_loss = tf.math.reduce_sum([loss(current_y_train_iteration, logits),
+                                               parameters.scale_weight *
+                                               losses.log_cosh_loss(tf.math.reduce_mean(y_train_iteration_jitter),
+                                                                    tf.math.reduce_mean(logits)),
                                                parameters.uncertainty_weight * uncertainty,
+                                               parameters.kernel_regulariser_weight *
                                                tf.math.reduce_mean(model.losses[::3]),
-                                               parameters.l1_weight_activity * tf.math.reduce_mean(model.losses[1::3]),
-                                               parameters.l1_weight_prelu * tf.math.reduce_mean(model.losses[2::3])])
+                                               parameters.activity_regulariser_weight *
+                                               tf.math.reduce_mean(model.losses[1::3]),
+                                               parameters.prelu_regulariser_weight *
+                                               tf.math.reduce_mean(model.losses[2::3])])
 
         loss_list.append(current_loss)
 
@@ -541,6 +572,9 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
         else:
             break
 
+    gc.collect()
+    k.backend.clear_session()
+
     # Use the gradient tape to automatically retrieve
     # the gradients of the trainable variables with respect to the loss.
     grads = tape.gradient(current_loss, model.trainable_weights)
@@ -550,6 +584,9 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
     # Run one step of gradient descent by updating
     # the value of the variables to minimize the loss.
     optimiser.apply_gradients(zip(grads, model.trainable_weights))
+
+    gc.collect()
+    k.backend.clear_session()
 
     return model, loss_list, uncertainty, previous_model_weight_list, previous_optimiser_weight_list
 
@@ -583,11 +620,13 @@ def test_step(model, loss, x_train_iteration, y_train_iteration, loss_mask_train
         get_bayesian_test_prediction(model, x_train_iteration, parameters.bayesian_iterations,
                                      parameters.bayesian_test_bool)
 
+    current_y_train_iteration = y_train_iteration * loss_mask_train_iteration
     current_x_prediction = x_prediction * loss_mask_train_iteration
 
-    evaluation_loss_list.append(loss(y_train_iteration, current_x_prediction))
+    evaluation_loss_list.append(loss(current_y_train_iteration, current_x_prediction))
 
-    current_accuracy = losses.correlation_coefficient_accuracy(y_train_iteration, current_x_prediction)
+    current_accuracy = [losses.correlation_coefficient_accuracy(current_y_train_iteration, current_x_prediction),
+                        losses.scale_accuracy(current_y_train_iteration, current_x_prediction)]
 
     return x_prediction, evaluation_loss_list, x_prediction_uncertainty, x_prediction_uncertainty_volume, current_accuracy
 
@@ -607,10 +646,10 @@ def test_backup(model, optimiser, loss_list, evaluation_loss_list, previous_mode
     with open(previous_model_weight_list[-1], "rb") as file:
         model.set_weights(pickle.load(file))
 
-    if len(previous_optimiser_weight_list) > 2:
+    try:
         with open(previous_optimiser_weight_list[-1], "rb") as file:
             optimiser.set_weights(pickle.load(file))
-    else:
+    except:
         optimiser = architecture.get_optimiser()
 
     if len(loss_list) > 1:
@@ -630,29 +669,49 @@ def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, lo
     x_prediction, _ = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps)
     x_prediction = np.squeeze(preprocessing.data_downsampling([x_prediction], "numpy", window_input_shape)[0])
 
-    loss_mask_train_iteration = np.squeeze(preprocessing.data_downsampling([loss_mask_train_iteration], "numpy",
-                                                                           window_input_shape)[0])
-
     x_prediction_uncertainty_volume = np.squeeze(preprocessing.data_downsampling([x_prediction_uncertainty_volume],
                                                                                  "numpy", window_input_shape)[0])
 
-    current_x_prediction = x_prediction * loss_mask_train_iteration
+    inverse_loss_mask_train_iteration = (loss_mask_train_iteration * -1.0) + 1.0
+
+    if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
+        inverse_loss_mask_train_iteration = \
+            np.squeeze(preprocessing.data_downsampling([inverse_loss_mask_train_iteration], "numpy",
+                                                       window_input_shape)[0])
+
+        current_x_prediction = x_prediction * inverse_loss_mask_train_iteration
+    else:
+        current_x_prediction = x_prediction
 
     if gt_prediction is not None:
         gt_prediction, _ = preprocessing.data_preprocessing([gt_prediction], "numpy", preprocessing_steps)
         gt_prediction = np.squeeze(preprocessing.data_downsampling([gt_prediction], "numpy", window_input_shape)[0])
 
-        gt_accuracy = losses.correlation_coefficient_accuracy(gt_prediction, current_x_prediction)
+        if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
+            current_gt_prediction = gt_prediction * inverse_loss_mask_train_iteration
+        else:
+            current_gt_prediction = gt_prediction
 
-        print("Output accuracy:\t{0:<20}".format(str(gt_accuracy.numpy())))
+        current_output_accuracy = \
+            [losses.correlation_coefficient_accuracy(current_gt_prediction, current_x_prediction).numpy(),
+             losses.scale_accuracy(current_gt_prediction, current_x_prediction).numpy()]
     else:
         y_train_iteration, _ = preprocessing.data_preprocessing([y_train_iteration], "numpy", preprocessing_steps)
         y_train_iteration = np.squeeze(preprocessing.data_downsampling([y_train_iteration], "numpy",
                                                                        window_input_shape)[0])
 
-        y_train_accuracy = losses.correlation_coefficient_accuracy(y_train_iteration, current_x_prediction)
+        if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
+            current_y_train_iteration = y_train_iteration * inverse_loss_mask_train_iteration
+        else:
+            current_y_train_iteration = y_train_iteration
 
-        print("Output accuracy:\t{0:<20}".format(str(y_train_accuracy.numpy())))
+        current_output_accuracy = \
+            [losses.correlation_coefficient_accuracy(current_y_train_iteration, current_x_prediction).numpy(),
+             losses.scale_accuracy(current_y_train_iteration, current_x_prediction).numpy()]
+
+    print("Output accuracy:\t{0:<20}".format(str(current_output_accuracy[0])))
+    print("Output scale accuracy:\t{0:<20}".format(str(current_output_accuracy[1])))
+    print("Output total accuracy:\t{0:<20}".format(str(np.mean([current_output_accuracy[0], current_output_accuracy[1]]))))
 
     print("Output uncertainty:\t{0:<20}".format(str(tf.math.reduce_mean(x_prediction_uncertainty_volume).numpy())))
 
@@ -862,7 +921,7 @@ def train_model():
 
             current_accuracy_nan_patience = 0
 
-            gt_accuracy = None
+            total_gt_current_accuracy = None
             max_accuracy = tf.cast(0.0, dtype=tf.float32)
             max_accuracy_iteration = 0
 
@@ -885,7 +944,8 @@ def train_model():
                     test_step(model, loss, x_train_iteration, y_train_iteration, loss_mask_train_iteration,
                               evaluation_loss_list)
 
-                if np.isnan(current_accuracy.numpy()) or np.isinf(current_accuracy.numpy()):
+                if ((np.isnan(current_accuracy[0].numpy()) or np.isinf(current_accuracy[0].numpy())) or
+                        (np.isnan(current_accuracy[1].numpy()) or np.isinf(current_accuracy[1].numpy()))):
                     model, optimiser, loss_list, evaluation_loss_list, previous_model_weight_list, previous_optimiser_weight_list = \
                         test_backup(model, optimiser, loss_list, evaluation_loss_list, previous_model_weight_list,
                                     previous_optimiser_weight_list)
@@ -897,14 +957,25 @@ def train_model():
                     if gt is None:
                         current_accuracy_nan_patience = 0
 
-                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}\tUncertainty:\t{2:<20}".format(str(loss_list[-1].numpy()), str(current_accuracy.numpy()), str(uncertainty.numpy())))
+                total_current_accuracy = tf.math.reduce_mean([current_accuracy[0], current_accuracy[1]])
+
+                print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}\tScale accuracy:\t{2:<20}\tTotal accuracy:\t{3:<20}\tUncertainty:\t{4:<20}".format(str(loss_list[-1].numpy()), str(current_accuracy[0].numpy()), str(current_accuracy[1].numpy()), str(total_current_accuracy.numpy()), str(uncertainty.numpy())))
 
                 if gt is not None:
-                    current_x_prediction = x_prediction * loss_mask_train_iteration
+                    inverse_loss_mask_train_iteration = (loss_mask_train_iteration * -1.0) + 1.0
 
-                    gt_accuracy = losses.correlation_coefficient_accuracy(gt_prediction, current_x_prediction)
+                    if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
+                        current_gt_prediction = gt_prediction * inverse_loss_mask_train_iteration
+                        current_x_prediction = x_prediction * inverse_loss_mask_train_iteration
+                    else:
+                        current_gt_prediction = gt_prediction
+                        current_x_prediction = x_prediction
 
-                    if np.isnan(gt_accuracy.numpy()) or np.isinf(gt_accuracy.numpy()):
+                    gt_accuracy = [losses.correlation_coefficient_accuracy(current_gt_prediction, current_x_prediction),
+                                   losses.scale_accuracy(current_gt_prediction, current_x_prediction)]
+
+                    if ((np.isnan(gt_accuracy[0].numpy()) or np.isinf(gt_accuracy[0].numpy())) or
+                            (np.isnan(gt_accuracy[1].numpy()) or np.isinf(gt_accuracy[1].numpy()))):
                         model, optimiser, loss_list, evaluation_loss_list, previous_model_weight_list, previous_optimiser_weight_list = \
                             test_backup(model, optimiser, loss_list, evaluation_loss_list, previous_model_weight_list,
                                         previous_optimiser_weight_list)
@@ -915,14 +986,16 @@ def train_model():
                     else:
                         current_accuracy_nan_patience = 0
 
-                    if max_accuracy < gt_accuracy:
-                        max_accuracy = gt_accuracy
-                        max_accuracy_iteration = len(loss_list)
+                    total_gt_current_accuracy = tf.math.reduce_mean([gt_accuracy[0], gt_accuracy[1]])
 
-                    print("GT loss:\t{0:<20}\tGT accuracy:\t{1:<20}\tGT uncertainty:\t{2:<20}".format(str(evaluation_loss_list[-1].numpy()), str(gt_accuracy.numpy()), str(x_prediction_uncertainty.numpy())))
+                    print("Subiteration:\tGT loss:\t{0:<20}\tGT accuracy:\t{1:<20}\tGT scale accuracy:\t{2:<20}\tGT total accuracy:\t{3:<20}\tGT uncertainty:\t{4:<20}".format(str(evaluation_loss_list[-1].numpy()), str(gt_accuracy[0].numpy()), str(gt_accuracy[1].numpy()), str(total_gt_current_accuracy.numpy()), str(x_prediction_uncertainty.numpy())))
+
+                    if max_accuracy < total_gt_current_accuracy:
+                        max_accuracy = total_gt_current_accuracy
+                        max_accuracy_iteration = len(loss_list)
                 else:
-                    if max_accuracy < current_accuracy:
-                        max_accuracy = current_accuracy
+                    if max_accuracy < total_current_accuracy:
+                        max_accuracy = total_current_accuracy
                         max_accuracy_iteration = len(loss_list)
 
                 if np.isnan(evaluation_loss_list[-1].numpy()):
@@ -1006,9 +1079,9 @@ def train_model():
                         print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy.numpy()), str(max_accuracy_iteration)))
 
                         if gt is not None:
-                            accuracy_loss = np.abs(gt_accuracy - max_accuracy)
+                            accuracy_loss = np.abs(total_gt_current_accuracy - max_accuracy)
                         else:
-                            accuracy_loss = np.abs(current_accuracy - max_accuracy)
+                            accuracy_loss = np.abs(total_current_accuracy - max_accuracy)
 
                         print("Accuracy loss:\t{0:<20}".format(str(accuracy_loss)))
 
@@ -1098,6 +1171,8 @@ def main():
 
     # import python_email_notification
     # python_email_notification.main()
+
+    device.reset()
 
     transcript.stop()
 

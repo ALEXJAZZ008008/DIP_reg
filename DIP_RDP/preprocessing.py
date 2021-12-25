@@ -163,32 +163,6 @@ def data_downsampling(data, data_type, new_resolution=None):
             data_copy = np.expand_dims(data_copy, 0)
 
         if new_resolution is not None:
-            dimension_x_crop_factor = int(np.floor((data_copy.shape[1] - new_resolution[0]) / 2.0))
-            dimension_y_crop_factor = int(np.floor((data_copy.shape[2] - new_resolution[1]) / 2.0))
-            dimension_z_crop_factor = int(np.floor((data_copy.shape[3] - new_resolution[2]) / 2.0))
-        else:
-            data_copy_shape = list(data_copy.shape)
-
-            for j in range(1, len(data_copy_shape)):
-                if data_copy_shape[j] < parameters.data_window_size:
-                    data_copy_shape[j] = parameters.data_window_size
-
-            dimension_x_crop_factor = \
-                int((data_copy.shape[1] -
-                     get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of)) / 2.0)
-            dimension_y_crop_factor = \
-                int((data_copy.shape[2] -
-                     get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of)) / 2.0)
-            dimension_z_crop_factor = \
-                int((data_copy.shape[3] -
-                     get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)) / 2.0)
-
-        if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
-            data_copy = data_copy[:, dimension_x_crop_factor or None:-dimension_x_crop_factor or None,
-                        dimension_y_crop_factor or None:-dimension_y_crop_factor or None,
-                        dimension_z_crop_factor or None:-dimension_z_crop_factor or None]
-
-        if new_resolution is not None:
             if data_copy.shape[1] % 2.0 != new_resolution[0] % 2.0:
                 dimension_x_crop_factor = 1
             else:
@@ -231,6 +205,32 @@ def data_downsampling(data, data_type, new_resolution=None):
         if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
             data_copy = data_copy[:, dimension_x_crop_factor or None:, dimension_y_crop_factor or None:,
                         dimension_z_crop_factor or None:]
+
+        if new_resolution is not None:
+            dimension_x_crop_factor = int(np.floor((data_copy.shape[1] - new_resolution[0]) / 2.0))
+            dimension_y_crop_factor = int(np.floor((data_copy.shape[2] - new_resolution[1]) / 2.0))
+            dimension_z_crop_factor = int(np.floor((data_copy.shape[3] - new_resolution[2]) / 2.0))
+        else:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            dimension_x_crop_factor = \
+                int((data_copy.shape[1] -
+                     get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of)) / 2.0)
+            dimension_y_crop_factor = \
+                int((data_copy.shape[2] -
+                     get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of)) / 2.0)
+            dimension_z_crop_factor = \
+                int((data_copy.shape[3] -
+                     get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)) / 2.0)
+
+        if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
+            data_copy = data_copy[:, dimension_x_crop_factor or None:-dimension_x_crop_factor or None,
+                        dimension_y_crop_factor or None:-dimension_y_crop_factor or None,
+                        dimension_z_crop_factor or None:-dimension_z_crop_factor or None]
 
         data_copy = np.expand_dims(data_copy, -1)
 
@@ -286,11 +286,12 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
     return data, preprocessing_steps
 
 
-def introduce_jitter(x_train_iteration, y_train_iteration):
+def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_iteration):
     print("introduce_jitter")
 
     x_train_iteration_jitter = x_train_iteration.numpy().astype(np.float64)
     y_train_iteration_jitter = y_train_iteration.numpy().astype(np.float64)
+    loss_mask_train_iteration_jitter = loss_mask_train_iteration.numpy().astype(np.float64)
 
     if parameters.jitter_magnitude > 0:
         x_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
@@ -301,67 +302,91 @@ def introduce_jitter(x_train_iteration, y_train_iteration):
             if x_jitter > 0:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, x_jitter:, :, :, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, x_jitter:, :, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, x_jitter:, :, :, :]
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
+                                                          mode="constant")
             else:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :x_jitter, :, :, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :x_jitter, :, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :x_jitter, :, :, :]
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
+                                                          mode="constant")
 
         if y_jitter < 0 or y_jitter > 0:
             if y_jitter > 0:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :, y_jitter:, :, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :, y_jitter:, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, y_jitter:, :, :]
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
+                                                          mode="constant")
             else:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :, :y_jitter, :, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :, :y_jitter, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, :y_jitter, :, :]
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
+                                                          mode="constant")
 
         if z_jitter < 0 or z_jitter > 0:
             if z_jitter > 0:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, z_jitter:, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, z_jitter:, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, :, z_jitter:, :]
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
+                                                          mode="constant")
             else:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, :z_jitter, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, :z_jitter, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, :, :z_jitter, :]
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
-                                                  mode="reflect")
+                                                  mode="constant")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
+                                                          mode="constant")
 
     if parameters.elastic_jitter_bool:
         if parameters.elastic_jitter_sigma > 0.0:
@@ -372,18 +397,22 @@ def introduce_jitter(x_train_iteration, y_train_iteration):
 
             points = points.astype(np.int).tolist()
 
-            [x_train_iteration_jitter, y_train_iteration_jitter] = \
-                elasticdeform.deform_random_grid([x_train_iteration_jitter, y_train_iteration_jitter],
-                                                 sigma=parameters.jitter_sigma, points=points, mode="reflect")  # noqa
+            [x_train_iteration_jitter, y_train_iteration_jitter, loss_mask_train_iteration_jitter] = \
+                elasticdeform.deform_random_grid([x_train_iteration_jitter, y_train_iteration_jitter,
+                                                  loss_mask_train_iteration_jitter],
+                                                 sigma=parameters.jitter_sigma, points=points, mode="constant")  # noqa
 
-            if main.float_sixteen_bool:
-                x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float16)
-                y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float16)
-            else:
-                x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float32)
-                y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float32)
+    if main.float_sixteen_bool:
+        x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float16)
+        y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float16)
+        loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter.astype(np.float16)
+    else:
+        x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float32)
+        y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float32)
+        loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter.astype(np.float32)
 
     x_train_iteration_jitter = tf.convert_to_tensor(x_train_iteration_jitter)
     y_train_iteration_jitter = tf.convert_to_tensor(y_train_iteration_jitter)
+    loss_mask_train_iteration_jitter = tf.convert_to_tensor(loss_mask_train_iteration_jitter)
 
-    return x_train_iteration_jitter, y_train_iteration_jitter
+    return x_train_iteration_jitter, y_train_iteration_jitter, loss_mask_train_iteration_jitter
