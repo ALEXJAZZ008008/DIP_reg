@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -60,8 +60,6 @@ def get_encoder(x):
 
     x = layers.get_gaussian_noise(x, parameters.input_gaussian_sigma)
 
-    x = layers.get_convolution_layer(x, 1, (3, 3, 3), (1, 1, 1), 1)
-
     for i in range(len(layer_layers)):
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
@@ -70,10 +68,9 @@ def get_encoder(x):
 
         x1 = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (2, 2, 2), layer_groups[i])
 
-        x2 = layers.get_reflection_padding(x, (3, 3, 3))
-        x2 = k.layers.MaxPooling3D(pool_size=(3, 3, 3),
+        x2 = k.layers.MaxPooling3D(pool_size=(2, 2, 2),
                                    strides=(2, 2, 2),
-                                   padding="valid")(x2)
+                                   padding="valid")(x)
 
         x = k.layers.Concatenate()([x1, x2])
 
@@ -104,9 +101,7 @@ def get_latent(x):
                                    trainable=False,
                                    name="latent")(x)
 
-        x = layers.get_convolution_layer(latnet_x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
-
-        for _ in range(1, layer_layers[i]):
+        for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
 
     return x, latnet_x
@@ -137,8 +132,7 @@ def get_decoder(x, unet_connections):
 
         x = k.layers.UpSampling3D(size=tuple([x * 2 for x in (2, 2, 2)]))(x)
 
-        x = layers.get_reflection_padding(x, (3, 3, 3))
-        x = k.layers.AveragePooling3D(pool_size=(3, 3, 3),
+        x = k.layers.AveragePooling3D(pool_size=(2, 2, 2),
                                       strides=(2, 2, 2),
                                       padding="valid")(x)
 

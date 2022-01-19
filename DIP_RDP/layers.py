@@ -34,16 +34,16 @@ def get_gaussian_noise(x, sigma):
 
 # https://www.machinecurve.com/index.php/2020/02/10/using-constant-padding-reflection-padding-and-replication-padding-with-keras/#reflection-padding
 '''
-  3D Reflection Padding
+  3D Padding
   Attributes:
     - padding: (padding_width, padding_height) tuple
 '''
 
 
-class ReflectionPadding3D(k.layers.Layer):
+class Padding3D(k.layers.Layer):
     def __init__(self, padding=(0, 0, 0), **kwargs):
         self.padding = tuple(padding)
-        super(ReflectionPadding3D, self).__init__(**kwargs)
+        super(Padding3D, self).__init__(**kwargs)
 
     def compute_output_shape(self, input_shape):
         return (input_shape[0],
@@ -57,11 +57,11 @@ class ReflectionPadding3D(k.layers.Layer):
                                      [self.padding[0], self.padding[0]],
                                      [self.padding[1], self.padding[1]],
                                      [self.padding[2], self.padding[2]],
-                                     [0, 0]], "REFLECT")
+                                     [0, 0]], "SYMMETRIC")
 
 
-def get_reflection_padding(x, size):
-    print("get_reflection_padding")
+def get_padding(x, size):
+    print("get_padding")
 
     if size[0] % 2 > 0:
         kernel_padding_1 = int(np.floor(size[0] / 2))
@@ -79,7 +79,7 @@ def get_reflection_padding(x, size):
         kernel_padding_3 = int(size[2] / 2) - 1
 
     if kernel_padding_1 != 0 or kernel_padding_2 != 0 or kernel_padding_3 != 0:
-        x = ReflectionPadding3D((kernel_padding_1, kernel_padding_2, kernel_padding_3))(x)
+        x = Padding3D((kernel_padding_1, kernel_padding_2, kernel_padding_3))(x)
 
     return x
 
@@ -165,7 +165,7 @@ def get_dropout(x):
 def get_convolution_layer(x, depth, size, stride, groups):
     print("get_convolution_layer")
 
-    x = get_reflection_padding(x, size)
+    x = get_padding(x, size)
     x = k.layers.Conv3D(filters=depth,
                         kernel_size=size,
                         strides=stride,

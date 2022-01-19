@@ -6,6 +6,7 @@
 import math
 import random
 import numpy as np
+import scipy.ndimage
 from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
 import elasticdeform
@@ -46,6 +47,63 @@ def get_previous_geometric_value(an, a0):
 
 def data_upsample(data, data_type, new_resolution=None):
     print("data_upsample")
+
+    for i in range(len(data)):
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
+        else:
+            if data_type == "numpy":
+                data_copy = data[i].copy()
+            else:
+                data_copy = None
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if new_resolution is None:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            new_resolution = [get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_downscale_factor = np.abs(new_resolution[0] / data_copy.shape[1])
+        dimension_y_downscale_factor = np.abs(new_resolution[1] / data_copy.shape[2])
+        dimension_z_downscale_factor = np.abs(new_resolution[2] / data_copy.shape[3])
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if (not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-04)):
+            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_downscale_factor, dimension_y_downscale_factor,
+                                                       dimension_z_downscale_factor), order=1, mode="nearest",
+                                           prefilter=True)
+
+        data_copy = np.expand_dims(data_copy, -1)
+
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
+        else:
+            if data_type == "numpy":
+                data[i] = data_copy
+
+    return data
+
+
+def data_upsample_pad(data, data_type, new_resolution=None):
+    print("data_upsample_pad")
 
     for i in range(len(data)):
         if data_type == "path":
@@ -104,33 +162,27 @@ def data_upsample(data, data_type, new_resolution=None):
 
         if dimension_x_pad_factor != 0 or dimension_y_pad_factor != 0 or dimension_z_pad_factor != 0:
             data_copy = np.pad(data_copy, ((0, 0), (dimension_x_pad_factor, 0), (dimension_y_pad_factor, 0),
-                                           (dimension_z_pad_factor, 0)), mode="reflect")
+                                           (dimension_z_pad_factor, 0)), mode="edge")
 
-        if new_resolution is not None:
-            dimension_x_pad_factor = int((new_resolution[0] - data_copy.shape[1]) / 2.0)
-            dimension_y_pad_factor = int((new_resolution[1] - data_copy.shape[2]) / 2.0)
-            dimension_z_pad_factor = int((new_resolution[2] - data_copy.shape[3]) / 2.0)
-        else:
+        if new_resolution is None:
             data_copy_shape = list(data_copy.shape)
 
             for j in range(1, len(data_copy_shape)):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
-            dimension_x_pad_factor = \
-                int((get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of) -
-                    data_copy.shape[1]) / 2.0)
-            dimension_y_pad_factor = \
-                int((get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of) -
-                     data_copy.shape[2]) / 2.0)
-            dimension_z_pad_factor = \
-                int((get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of) -
-                     data_copy.shape[3]) / 2.0)
+            new_resolution = [get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_pad_factor = int(np.abs((new_resolution[0] - data_copy.shape[1]) / 2.0))
+        dimension_y_pad_factor = int(np.abs((new_resolution[1] - data_copy.shape[2]) / 2.0))
+        dimension_z_pad_factor = int(np.abs((new_resolution[2] - data_copy.shape[3]) / 2.0))
 
         if dimension_x_pad_factor != 0 or dimension_y_pad_factor != 0 or dimension_z_pad_factor != 0:
             data_copy = np.pad(data_copy, ((0, 0), (dimension_x_pad_factor, dimension_x_pad_factor),
                                            (dimension_y_pad_factor, dimension_y_pad_factor),
-                                           (dimension_z_pad_factor, dimension_z_pad_factor)), mode="reflect")
+                                           (dimension_z_pad_factor, dimension_z_pad_factor)), mode="edge")
 
         data_copy = np.expand_dims(data_copy, -1)
 
@@ -146,6 +198,63 @@ def data_upsample(data, data_type, new_resolution=None):
 
 def data_downsampling(data, data_type, new_resolution=None):
     print("data_downsampling")
+
+    for i in range(len(data)):
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
+        else:
+            if data_type == "numpy":
+                data_copy = data[i].copy()
+            else:
+                data_copy = None
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if new_resolution is None:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            new_resolution = [get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_downscale_factor = np.abs(new_resolution[0] / data_copy.shape[1])
+        dimension_y_downscale_factor = np.abs(new_resolution[1] / data_copy.shape[2])
+        dimension_z_downscale_factor = np.abs(new_resolution[2] / data_copy.shape[3])
+
+        if (not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-04)):
+            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_downscale_factor, dimension_y_downscale_factor,
+                                                       dimension_z_downscale_factor), order=1, mode="nearest",
+                                           prefilter=True)
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        data_copy = np.expand_dims(data_copy, -1)
+
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
+        else:
+            if data_type == "numpy":
+                data[i] = data_copy
+
+    return data
+
+
+def data_downsampling_crop(data, data_type, new_resolution=None):
+    print("data_downsampling_crop")
 
     for i in range(len(data)):
         if data_type == "path":
@@ -206,26 +315,20 @@ def data_downsampling(data, data_type, new_resolution=None):
             data_copy = data_copy[:, dimension_x_crop_factor or None:, dimension_y_crop_factor or None:,
                         dimension_z_crop_factor or None:]
 
-        if new_resolution is not None:
-            dimension_x_crop_factor = int(np.floor((data_copy.shape[1] - new_resolution[0]) / 2.0))
-            dimension_y_crop_factor = int(np.floor((data_copy.shape[2] - new_resolution[1]) / 2.0))
-            dimension_z_crop_factor = int(np.floor((data_copy.shape[3] - new_resolution[2]) / 2.0))
-        else:
+        if new_resolution is None:
             data_copy_shape = list(data_copy.shape)
 
             for j in range(1, len(data_copy_shape)):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
-            dimension_x_crop_factor = \
-                int((data_copy.shape[1] -
-                     get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of)) / 2.0)
-            dimension_y_crop_factor = \
-                int((data_copy.shape[2] -
-                     get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of)) / 2.0)
-            dimension_z_crop_factor = \
-                int((data_copy.shape[3] -
-                     get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)) / 2.0)
+            new_resolution = [get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_crop_factor = int(np.abs(np.floor((data_copy.shape[1] - new_resolution[0]) / 2.0)))
+        dimension_y_crop_factor = int(np.abs(np.floor((data_copy.shape[2] - new_resolution[1]) / 2.0)))
+        dimension_z_crop_factor = int(np.abs(np.floor((data_copy.shape[3] - new_resolution[2]) / 2.0)))
 
         if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
             data_copy = data_copy[:, dimension_x_crop_factor or None:-dimension_x_crop_factor or None,
@@ -306,13 +409,13 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
                                                           ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
-                                                          mode="constant")
+                                                          mode="edge")
             else:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :x_jitter, :, :, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :x_jitter, :, :, :]
@@ -320,13 +423,13 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
                                                           ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
-                                                          mode="constant")
+                                                          mode="edge")
 
         if y_jitter < 0 or y_jitter > 0:
             if y_jitter > 0:
@@ -336,13 +439,13 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
                                                           ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
-                                                          mode="constant")
+                                                          mode="edge")
             else:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :, :y_jitter, :, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :, :y_jitter, :, :]
@@ -350,13 +453,13 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
                                                           ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
-                                                          mode="constant")
+                                                          mode="edge")
 
         if z_jitter < 0 or z_jitter > 0:
             if z_jitter > 0:
@@ -366,13 +469,13 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
                                                           ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
-                                                          mode="constant")
+                                                          mode="edge")
             else:
                 x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, :z_jitter, :]
                 y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, :z_jitter, :]
@@ -380,13 +483,13 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
 
                 x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
                                                   ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
-                                                  mode="constant")
+                                                  mode="edge")
                 loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
                                                           ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
-                                                          mode="constant")
+                                                          mode="edge")
 
     if parameters.elastic_jitter_bool:
         if parameters.elastic_jitter_sigma > 0.0:
@@ -400,7 +503,7 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
             [x_train_iteration_jitter, y_train_iteration_jitter, loss_mask_train_iteration_jitter] = \
                 elasticdeform.deform_random_grid([x_train_iteration_jitter, y_train_iteration_jitter,
                                                   loss_mask_train_iteration_jitter],
-                                                 sigma=parameters.jitter_sigma, points=points, mode="constant")  # noqa
+                                                 sigma=parameters.jitter_sigma, points=points, mode="edge")  # noqa
 
     if main.float_sixteen_bool:
         x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float16)

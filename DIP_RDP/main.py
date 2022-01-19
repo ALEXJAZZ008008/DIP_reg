@@ -114,9 +114,9 @@ def get_data_windows(data):
             windowed_full_input_axial_size = \
                 (number_of_windows * parameters.data_window_size) - (number_of_overlaps * overlap_size)
 
-            data = np.squeeze(preprocessing.data_upsample([np.expand_dims(np.expand_dims(data, 0), -1)], "numpy",
-                                                          (data.shape[0], data.shape[1],
-                                                           windowed_full_input_axial_size)))
+            data = np.squeeze(preprocessing.data_upsample_pad([np.expand_dims(np.expand_dims(data, 0), -1)], "numpy",
+                                                              (data.shape[0], data.shape[1],
+                                                               windowed_full_input_axial_size)))
 
             current_data = []
 
@@ -148,8 +148,32 @@ def get_data_windows(data):
     return data, windowed_full_input_axial_size
 
 
+def normalise_voxel_sizes(data, voxel_sizes):
+    print("normalise_voxel_sizes")
+
+    min_voxel_sizes = np.min(voxel_sizes)
+    data_shape = data.shape
+
+    data = \
+        np.squeeze(preprocessing.data_upsample([data], "numpy",
+                                               (int(np.round((data_shape[0] / min_voxel_sizes) * voxel_sizes[0])),
+                                                int(np.round((data_shape[1] / min_voxel_sizes) * voxel_sizes[1])),
+                                                int(np.round((data_shape[2] / min_voxel_sizes) * voxel_sizes[2]))))[0])
+
+    return data
+
+
 def get_train_data():
     print("get_train_data")
+
+    y_path = "{0}/y/".format(data_path)
+
+    y_files = os.listdir(y_path)
+    y_files.sort(key=human_sorting)
+    y_files = ["{0}{1}".format(y_path, s) for s in y_files]
+
+    example_data = nib.load(y_files[0])
+    voxel_sizes = example_data.get_header().get_zooms()
 
     data_mask_path = "{0}/data_mask/".format(data_path)
 
@@ -168,6 +192,7 @@ def get_train_data():
         for i in range(len(data_mask_files)):
             current_array = nib.load(data_mask_files[i]).get_data()
 
+            current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
 
             current_data_mask_train_path = "{0}/{1}.npy.gz".format(data_mask_train_output_path, str(i))
@@ -198,6 +223,7 @@ def get_train_data():
         for i in range(len(loss_mask_files)):
             current_array = nib.load(loss_mask_files[i]).get_data()
 
+            current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
 
             current_loss_mask_train_path = "{0}/{1}.npy.gz".format(loss_mask_train_output_path, str(i))
@@ -208,12 +234,6 @@ def get_train_data():
             loss_mask.append(current_loss_mask_train_path)
     else:
         loss_mask = None
-
-    y_path = "{0}/y/".format(data_path)
-
-    y_files = os.listdir(y_path)
-    y_files.sort(key=human_sorting)
-    y_files = ["{0}{1}".format(y_path, s) for s in y_files]
 
     x = []
     y = []
@@ -236,6 +256,8 @@ def get_train_data():
     for i in range(len(y_files)):
         current_volume = nib.load(y_files[i])
         current_array = current_volume.get_data()
+
+        current_array = normalise_voxel_sizes(current_array, voxel_sizes)
 
         if parameters.data_window_bool:
             if full_current_shape is None:
@@ -269,7 +291,7 @@ def get_train_data():
                                                                      parameters.data_gaussian_smooth_sigma_xy,
                                                                      parameters.data_gaussian_smooth_sigma_xy,
                                                                      parameters.data_gaussian_smooth_sigma_z),
-                                                              mode="mirror")
+                                                              mode="edge")
 
                 current_array, _ = preprocessing.data_preprocessing(current_array, "numpy")
         else:
@@ -340,6 +362,7 @@ def get_train_data():
         for i in range(len(gt_files)):
             current_array = nib.load(gt_files[i]).get_data()
 
+            current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
 
             if data_mask is not None:
@@ -373,26 +396,26 @@ def get_train_data():
 
             loss_mask.append(current_loss_mask_train_path)
 
-    return x, y, full_current_shape, windowed_full_input_axial_size, current_shape, gt, data_mask, loss_mask
+    return x, y, example_data, full_current_shape, windowed_full_input_axial_size, current_shape, gt, data_mask, loss_mask
 
 
 def get_preprocessed_train_data():
     print("get_preprocessed_train_data")
 
-    x, y, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt, data_mask, loss_mask = \
+    x, y, example_data, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt, data_mask, loss_mask = \
         get_train_data()
 
-    x = preprocessing.data_upsample(x, "path")
-    y = preprocessing.data_upsample(y, "path")
+    x = preprocessing.data_upsample_pad(x, "path")
+    y = preprocessing.data_upsample_pad(y, "path")
 
     if gt is not None:
-        gt = preprocessing.data_upsample(gt, "path")
+        gt = preprocessing.data_upsample_pad(gt, "path")
 
     if data_mask is not None:
-        data_mask = preprocessing.data_upsample(data_mask, "path")
+        data_mask = preprocessing.data_upsample_pad(data_mask, "path")
 
     if loss_mask is not None:
-        loss_mask = preprocessing.data_upsample(loss_mask, "path")
+        loss_mask = preprocessing.data_upsample_pad(loss_mask, "path")
 
     x, _ = preprocessing.data_preprocessing(x, "path")
     y, preprocessing_steps = preprocessing.data_preprocessing(y, "path")
@@ -400,7 +423,7 @@ def get_preprocessed_train_data():
     if gt is not None:
         gt, _ = preprocessing.data_preprocessing(gt, "path")
 
-    return x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt, data_mask, loss_mask
+    return x, y, example_data, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt, data_mask, loss_mask
 
 
 # https://stackoverflow.com/questions/43137288/how-to-determine-needed-memory-of-keras-model
@@ -555,7 +578,7 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
 
             loss_gradient = np.gradient(loss_list[-current_patience:])[-1]
 
-            if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=parameters.plateau_cutoff):
+            if not np.allclose(loss_gradient, np.zeros(loss_gradient.shape), rtol=0.0, atol=parameters.plateau_cutoff):
                 if not (loss_list[-1] * (parameters.backtracking_weight_percentage / 100.0) < loss_list[-2]):
                     if current_loss_increase_patience >= parameters.patience:
                         print("WARNING: Loss increased above threshold; patience reached, allowing anyway!")
@@ -667,17 +690,17 @@ def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, lo
     print("output_window_predictions")
 
     x_prediction, _ = preprocessing.data_preprocessing([x_prediction], "numpy", preprocessing_steps)
-    x_prediction = np.squeeze(preprocessing.data_downsampling([x_prediction], "numpy", window_input_shape)[0])
+    x_prediction = np.squeeze(preprocessing.data_downsampling_crop([x_prediction], "numpy", window_input_shape)[0])
 
-    x_prediction_uncertainty_volume = np.squeeze(preprocessing.data_downsampling([x_prediction_uncertainty_volume],
-                                                                                 "numpy", window_input_shape)[0])
+    x_prediction_uncertainty_volume = np.squeeze(preprocessing.data_downsampling_crop([x_prediction_uncertainty_volume],
+                                                                                      "numpy", window_input_shape)[0])
 
     inverse_loss_mask_train_iteration = (loss_mask_train_iteration * -1.0) + 1.0
 
     if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
         inverse_loss_mask_train_iteration = \
-            np.squeeze(preprocessing.data_downsampling([inverse_loss_mask_train_iteration], "numpy",
-                                                       window_input_shape)[0])
+            np.squeeze(preprocessing.data_downsampling_crop([inverse_loss_mask_train_iteration], "numpy",
+                                                            window_input_shape)[0])
 
         current_x_prediction = x_prediction * inverse_loss_mask_train_iteration
     else:
@@ -685,7 +708,8 @@ def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, lo
 
     if gt_prediction is not None:
         gt_prediction, _ = preprocessing.data_preprocessing([gt_prediction], "numpy", preprocessing_steps)
-        gt_prediction = np.squeeze(preprocessing.data_downsampling([gt_prediction], "numpy", window_input_shape)[0])
+        gt_prediction = np.squeeze(preprocessing.data_downsampling_crop([gt_prediction], "numpy",
+                                                                        window_input_shape)[0])
 
         if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
             current_gt_prediction = gt_prediction * inverse_loss_mask_train_iteration
@@ -697,8 +721,8 @@ def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, lo
              losses.scale_accuracy(current_gt_prediction, current_x_prediction).numpy()]
     else:
         y_train_iteration, _ = preprocessing.data_preprocessing([y_train_iteration], "numpy", preprocessing_steps)
-        y_train_iteration = np.squeeze(preprocessing.data_downsampling([y_train_iteration], "numpy",
-                                                                       window_input_shape)[0])
+        y_train_iteration = np.squeeze(preprocessing.data_downsampling_crop([y_train_iteration], "numpy",
+                                                                            window_input_shape)[0])
 
         if tf.reduce_sum(tf.cast(inverse_loss_mask_train_iteration, dtype=tf.float32)) > 0.0:
             current_y_train_iteration = y_train_iteration * inverse_loss_mask_train_iteration
@@ -728,8 +752,8 @@ def output_window_predictions(x_prediction, y_train_iteration, gt_prediction, lo
     return current_data_path, current_uncertainty_data_path
 
 
-def output_patient_time_point_predictions(window_data_paths, windowed_full_input_axial_size, full_input_shape,
-                                          current_output_path, current_output_prefix, i):
+def output_patient_time_point_predictions(window_data_paths, example_data, windowed_full_input_axial_size,
+                                          full_input_shape, current_output_path, current_output_prefix, i):
     print("output_patient_time_point_predictions")
 
     if len(window_data_paths) > 1:
@@ -774,9 +798,14 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
     else:
         output_array = nib.load(window_data_paths[0]).get_data()
 
-    output_array = np.squeeze(preprocessing.data_downsampling([output_array], "numpy", full_input_shape)[0])
+    output_array = np.squeeze(preprocessing.data_downsampling_crop([output_array], "numpy", full_input_shape)[0])
 
-    output_volume = nib.Nifti1Image(output_array, np.eye(4), nib.Nifti1Header())
+    example_data_header = example_data.get_header()
+
+    output_array = np.squeeze(preprocessing.data_downsampling([output_array], "numpy",
+                                                              example_data_header.get_data_shape())[0])
+
+    output_volume = nib.Nifti1Image(output_array, example_data.get_affine(), example_data_header)
 
     current_data_path = "{0}/{1}_{2}.nii.gz".format(current_output_path, str(i), current_output_prefix)
     nib.save(output_volume, current_data_path)
@@ -788,7 +817,7 @@ def train_model():
     print("train_model")
 
     # get data and lables
-    x, y, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt, data_mask, loss_mask = \
+    x, y, example_data, preprocessing_steps, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt, data_mask, loss_mask = \
         get_preprocessed_train_data()
 
     with gzip.GzipFile(x[0], "r") as file:
@@ -1074,7 +1103,8 @@ def train_model():
 
                     print("Plateau cutoff:\t{0:<20}\tMax distance to plateau cutoff:\t{1:<20}".format(str(parameters.plateau_cutoff), str(np.max(np.abs(loss_gradient) - parameters.plateau_cutoff))))
 
-                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=parameters.plateau_cutoff):
+                    if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), rtol=0.0,
+                                   atol=parameters.plateau_cutoff):
                         print("Reached plateau: Exiting...")
                         print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy.numpy()), str(max_accuracy_iteration)))
 
@@ -1122,11 +1152,11 @@ def train_model():
                     pickle.dump(optimiser.get_weights(), file)
 
         try:
-            output_patient_time_point_predictions(current_window_data_paths,
+            output_patient_time_point_predictions(current_window_data_paths, example_data,
                                                   windowed_full_input_axial_size,
                                                   full_input_shape, patient_output_path, "output", i)
 
-            output_patient_time_point_predictions(current_window_uncertainty_data_paths,
+            output_patient_time_point_predictions(current_window_uncertainty_data_paths, example_data,
                                                   windowed_full_input_axial_size,
                                                   full_input_shape, patient_output_path, "uncertainty", i)
 

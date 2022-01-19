@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -9,15 +9,13 @@ import os
 data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output/static_mean_thorax_simulation_noisy/".format(os.getcwd())
 
-# gaussian_path = ""
-gaussian_path = "{0}/input/untrained/".format(os.getcwd())
-# gaussian_path = "{0}/input/untrained_inpainting/".format(os.getcwd())
+# data_path = "{0}/DIP_RDP_data/insert_inpainting_test/".format(os.path.dirname(os.getcwd()))
+# output_path = "{0}/output/insert_inpainting_test/".format(os.getcwd())
 
-data_window_size = 64
+gaussian_path = ""
+
+data_window_size = 128
 data_window_bool = True
-
-# data_window_size = 32
-# data_window_bool = True
 
 data_resample_power_of = 2
 
@@ -29,17 +27,11 @@ data_gaussian_smooth_sigma_z = 0.0
 input_gaussian_weight = 1.0
 
 
-# model_path = ""
-model_path = "{0}/input/untrained/".format(os.getcwd())
-# model_path = "{0}/input/untrained_inpainting/".format(os.getcwd())
+model_path = ""
 
-layer_layers = [2, 2, 2, 2, 2, 1]
-layer_depth = [1, 2, 4, 8, 16, 32]
-layer_groups = [1, 1, 1, 1, 1, 1]
-
-# layer_layers = [2, 2, 2, 2, 1]
-# layer_depth = [1, 2, 4, 8, 16]
-# layer_groups = [1, 1, 1, 1, 1]
+layer_layers = [2, 2, 2, 2, 2, 2, 1]
+layer_depth = [1, 2, 4, 8, 16, 32, 64]
+layer_groups = [1, 1, 1, 1, 1, 1, 1]
 
 
 new_model_patient_bool = False
@@ -48,23 +40,12 @@ new_optimiser_patient_bool = True
 new_model_window_bool = False
 new_optimiser_window_bool = True
 
-# new_model_patient_bool = True
-# new_optimiser_patient_bool = True
 
-# new_model_window_bool = True
-# new_optimiser_window_bool = True
-
-
-jitter_magnitude = 6
-# jitter_magnitude = 4
+jitter_magnitude = 0
 
 elastic_jitter_bool = False
 elastic_jitter_sigma = 0.0
 elastic_jitter_points_iterations = 6
-
-# elastic_jitter_bool = False
-# elastic_jitter_sigma = 0.0
-# elastic_jitter_points_iterations = 5
 
 
 input_gaussian_sigma = 0.0
@@ -72,44 +53,29 @@ skip_gaussian_sigma = 0.0
 layer_gaussian_sigma = 0.0
 
 
-dropout = 0.1
-# dropout = 0.0
+dropout = 0.0
 
 bayesian_test_bool = False
-bayesian_output_bool = True
-bayesian_iterations = 64
-
-# bayesian_test_bool = False
-# bayesian_output_bool = False
-# bayesian_iterations = 0
+bayesian_output_bool = False
+bayesian_iterations = 1
 
 
 log_cosh_weight = 1e00
 
-relative_difference_bool = True
-relative_difference_weight = 1e01
-relative_difference_edge_preservation_weight = 1e00
-
-# relative_difference_bool = False
-# relative_difference_weight = 0.0
-# relative_difference_edge_preservation_weight = 0.0
+relative_difference_bool = False
+relative_difference_weight = 0.0
+relative_difference_edge_preservation_weight = 0.0
 
 scale_weight = 0.0
-# scale_weight = 0.0
 
 uncertainty_weight = 0.0
 
-kernel_regulariser_weight = 1e02
-activity_regulariser_weight = 1e01
+kernel_regulariser_weight = 0.0
+activity_regulariser_weight = 0.0
 prelu_regulariser_weight = 0.0
 
-# kernel_regulariser_weight = 1e01
-# activity_regulariser_weight = 1e-01
-# prelu_regulariser_weight = 0.0
 
-
-weight_decay = 1e-06
-# weight_decay = 1e-05
+weight_decay = 0.0
 
 
 backtracking_weight_percentage = 0.0
