@@ -1,26 +1,39 @@
+# Copyright University College London 2022
+# Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
+# For internal research only.
+
+
 """
 https://stackoverflow.com/questions/14906764/how-to-redirect-stdout-to-both-file-and-console-with-scripting
 Transcript - direct print output to a file, in addition to terminal.
 
 Usage:
     import transcript
-    transcript.start('logfile.log')
+    transcript.start("logfile.log")
     print("inside file")
     transcript.stop()
     print("outside file")
 """
 
+
 import sys
 
 
 class Transcript(object):
-    def __init__(self, filename):
-        self.terminal = sys.stdout
-        self.logfile = open(filename, "a")
+    def __init__(self, filename=None):
+        self.stdout = sys.stdout
+        self.stderr = sys.stderr
+
+        if filename is not None:
+            self.logfile = open(filename, "a")
+        else:
+            self.logfile = None
 
     def write(self, message):
-        self.terminal.write(message)
-        self.logfile.write(message)
+        self.stdout.write(message)
+
+        if self.logfile is not None:
+            self.logfile.write(message)
 
     def flush(self):
         # this flush method is needed for python 3 compatibility.
@@ -30,12 +43,26 @@ class Transcript(object):
         pass
 
 
-def start(filename):
+def transcript_start(filename):
     """Start transcript, appending print output to given filename"""
-    sys.stdout = Transcript(filename)
+
+    logfile = Transcript(filename)
+
+    sys.stdout = logfile
+    sys.stderr = logfile
+
+    return logfile
 
 
-def stop():
+def transcript_stop(logfile=Transcript()):
     """Stop transcript and return print functionality to normal"""
-    sys.stdout.logfile.close()
-    sys.stdout = sys.stdout.terminal
+
+    try:
+        logfile.logfile.close()
+
+        sys.stdout = logfile.stdout
+        sys.stderr = logfile.stderr
+    except:
+        pass
+
+    return True

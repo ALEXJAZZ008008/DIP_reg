@@ -9,11 +9,11 @@ import tensorflow_addons as tfa
 import tensorflow.keras as k
 
 
-import main
+import DIP_RDP
 
-if main.reproducible_bool:
+if DIP_RDP.reproducible_bool:
     # 4. Set `tensorflow` pseudo-random generator at a fixed value
-    tf.random.set_seed(main.seed_value)
+    tf.random.set_seed(DIP_RDP.seed_value)
 
 
 import parameters
@@ -213,6 +213,9 @@ def get_loss():
     if parameters.relative_difference_bool:
         loss = losses.log_cosh_relative_difference_loss
     else:
-        loss = losses.log_cosh_loss
+        if parameters.total_variation_bool:
+            loss = losses.log_cosh_total_variation_loss
+        else:
+            loss = losses.log_cosh_loss
 
     return loss

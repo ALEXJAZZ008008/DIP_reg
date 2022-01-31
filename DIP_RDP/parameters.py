@@ -62,6 +62,9 @@ bayesian_iterations = 1
 
 log_cosh_weight = 1e00
 
+total_variation_bool = False
+total_variation_weight = 0.0
+
 relative_difference_bool = False
 relative_difference_weight = 0.0
 relative_difference_edge_preservation_weight = 0.0

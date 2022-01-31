@@ -20,8 +20,6 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 import gzip
 
-import losses
-
 
 reproducible_bool = True
 
@@ -75,10 +73,11 @@ else:
 import parameters
 import preprocessing
 import architecture
+import losses
 
 
-data_path = parameters.data_path
-output_path = parameters.output_path
+data_path = None
+output_path = None
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -839,6 +838,9 @@ def train_model():
     k.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
                        show_layer_names=True, expand_nested=True)
 
+    output_paths = []
+    output_uncertainty_paths = []
+
     for i in range(len(y)):
         if parameters.new_model_patient_bool and not parameters.new_model_window_bool:
             if os.path.exists(model_update_path):
@@ -1017,7 +1019,7 @@ def train_model():
 
                     total_gt_current_accuracy = tf.math.reduce_mean([gt_accuracy[0], gt_accuracy[1]])
 
-                    print("Subiteration:\tGT loss:\t{0:<20}\tGT accuracy:\t{1:<20}\tGT scale accuracy:\t{2:<20}\tGT total accuracy:\t{3:<20}\tGT uncertainty:\t{4:<20}".format(str(evaluation_loss_list[-1].numpy()), str(gt_accuracy[0].numpy()), str(gt_accuracy[1].numpy()), str(total_gt_current_accuracy.numpy()), str(x_prediction_uncertainty.numpy())))
+                    print("GT loss:\t{0:<20}\tGT accuracy:\t{1:<20}\tGT scale accuracy:\t{2:<20}\tGT total accuracy:\t{3:<20}\tGT uncertainty:\t{4:<20}".format(str(evaluation_loss_list[-1].numpy()), str(gt_accuracy[0].numpy()), str(gt_accuracy[1].numpy()), str(total_gt_current_accuracy.numpy()), str(x_prediction_uncertainty.numpy())))
 
                     if max_accuracy < total_gt_current_accuracy:
                         max_accuracy = total_gt_current_accuracy
@@ -1152,13 +1154,16 @@ def train_model():
                     pickle.dump(optimiser.get_weights(), file)
 
         try:
-            output_patient_time_point_predictions(current_window_data_paths, example_data,
-                                                  windowed_full_input_axial_size,
-                                                  full_input_shape, patient_output_path, "output", i)
+            output_paths.append(output_patient_time_point_predictions(current_window_data_paths, example_data,
+                                                                      windowed_full_input_axial_size,
+                                                                      full_input_shape, patient_output_path, "output",
+                                                                      i))
 
-            output_patient_time_point_predictions(current_window_uncertainty_data_paths, example_data,
-                                                  windowed_full_input_axial_size,
-                                                  full_input_shape, patient_output_path, "uncertainty", i)
+            output_uncertainty_paths.append(output_patient_time_point_predictions(current_window_uncertainty_data_paths,
+                                                                                  example_data,
+                                                                                  windowed_full_input_axial_size,
+                                                                                  full_input_shape, patient_output_path,
+                                                                                  "uncertainty", i))
 
             if parameters.new_model_patient_bool and not parameters.new_model_window_bool:
                 with open("{0}/model.pkl".format(patient_output_path), "wb") as file:
@@ -1176,13 +1181,29 @@ def train_model():
         with open("{0}/optimiser.pkl".format(output_path), "wb") as file:
             pickle.dump(optimiser.get_weights(), file)
 
+    return output_paths, output_uncertainty_paths
 
-def main():
+
+def main(input_data_path=None, input_output_path=None):
     print("main")
 
+    global data_path
+    global output_path
+
+    if input_data_path is not None:
+        data_path = input_data_path
+    else:
+        data_path = parameters.data_path
+
+    if input_output_path is not None:
+        output_path = input_output_path
+    else:
+        output_path = parameters.output_path
+
     # if debugging, remove previous output directory
-    if os.path.exists(output_path):
-        shutil.rmtree(output_path)
+    if input_output_path is None:
+        if os.path.exists(output_path):
+            shutil.rmtree(output_path)
 
     # create output directory
     if not os.path.exists(output_path):
@@ -1195,18 +1216,18 @@ def main():
         os.remove(logfile_path)
 
     import transcript
-    transcript.start(logfile_path)
+    logfile = transcript.transcript_start(logfile_path)
 
-    train_model()
+    output_paths, output_uncertainty_paths = train_model()
 
     # import python_email_notification
     # python_email_notification.main()
 
     device.reset()
 
-    transcript.stop()
+    transcript.transcript_stop(logfile)
 
-    return True
+    return output_paths, output_uncertainty_paths
 
 
 if __name__ == "__main__":

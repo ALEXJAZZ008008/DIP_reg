@@ -5,18 +5,19 @@
 
 import math
 import numpy as np
-import scipy.stats
 import scipy.ndimage
 from sklearn.preprocessing import StandardScaler
 import gzip
 
-import main
-import parameters
 
+import TV
 
-if main.reproducible_bool:
+if TV.reproducible_bool:
     # 3. Set `numpy` pseudo-random generator at a fixed value
-    np.random.seed(main.seed_value)
+    np.random.seed(TV.seed_value)
+
+
+import parameters
 
 
 def get_next_geometric_value(an, a0):
@@ -30,10 +31,76 @@ def get_next_geometric_value(an, a0):
     return an
 
 
+def get_previous_geometric_value(an, a0):
+    print("get_previous_geometric_value")
+
+    n = math.log2(an / a0) + 1
+
+    if not n.is_integer():
+        an = a0 * np.power(2, (math.floor(n) - 1))
+
+    return an
+
+
 def data_upsample(data, data_type, new_resolution=None):
     print("data_upsample")
 
-    geometric_sequence_a0 = 2
+    for i in range(len(data)):
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
+        else:
+            if data_type == "numpy":
+                data_copy = data[i].copy()
+            else:
+                data_copy = None
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if new_resolution is None:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            new_resolution = [get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_downscale_factor = np.abs(new_resolution[0] / data_copy.shape[1])
+        dimension_y_downscale_factor = np.abs(new_resolution[1] / data_copy.shape[2])
+        dimension_z_downscale_factor = np.abs(new_resolution[2] / data_copy.shape[3])
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if (not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-04)):
+            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_downscale_factor, dimension_y_downscale_factor,
+                                                       dimension_z_downscale_factor), order=1, mode="nearest",
+                                           prefilter=True)
+
+        data_copy = np.expand_dims(data_copy, -1)
+
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
+        else:
+            if data_type == "numpy":
+                data[i] = data_copy
+
+    return data
+
+
+def data_upsample_pad(data, data_type, new_resolution=None):
+    print("data_upsample_pad")
 
     for i in range(len(data)):
         if data_type == "path":
@@ -51,29 +118,68 @@ def data_upsample(data, data_type, new_resolution=None):
             data_copy = np.expand_dims(data_copy, 0)
 
         if new_resolution is not None:
-            dimension_x_upscale_factor = new_resolution[0] / data_copy.shape[1]
-            dimension_y_upscale_factor = new_resolution[1] / data_copy.shape[2]
-            dimension_z_upscale_factor = new_resolution[2] / data_copy.shape[3]
+            if data_copy.shape[1] % 2.0 != new_resolution[0] % 2.0:
+                dimension_x_pad_factor = 1
+            else:
+                dimension_x_pad_factor = 0
+
+            if data_copy.shape[2] % 2.0 != new_resolution[1] % 2.0:
+                dimension_y_pad_factor = 1
+            else:
+                dimension_y_pad_factor = 0
+
+            if data_copy.shape[3] % 2.0 != new_resolution[2] % 2.0:
+                dimension_z_pad_factor = 1
+            else:
+                dimension_z_pad_factor = 0
         else:
             data_copy_shape = list(data_copy.shape)
 
-            for j in range(len(data_copy_shape)):
+            for j in range(1, len(data_copy_shape)):
                 if data_copy_shape[j] < parameters.data_window_size:
                     data_copy_shape[j] = parameters.data_window_size
 
-            dimension_x_upscale_factor = \
-                get_next_geometric_value(data_copy_shape[1], geometric_sequence_a0) / data_copy.shape[1]
-            dimension_y_upscale_factor = \
-                get_next_geometric_value(data_copy_shape[2], geometric_sequence_a0) / data_copy.shape[2]
-            dimension_z_upscale_factor = \
-                get_next_geometric_value(data_copy_shape[3], geometric_sequence_a0) / data_copy.shape[3]
+            if (data_copy.shape[1] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of) % 2.0):
+                dimension_x_pad_factor = 1
+            else:
+                dimension_x_pad_factor = 0
 
-        if not np.isclose(dimension_x_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                not np.isclose(dimension_y_upscale_factor, 1.0, rtol=0.0, atol=1e-05) or \
-                not np.isclose(dimension_z_upscale_factor, 1.0, rtol=0.0, atol=1e-05):
-            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_upscale_factor, dimension_y_upscale_factor,
-                                                       dimension_z_upscale_factor), order=3, mode="mirror",
-                                           prefilter=True)
+            if (data_copy.shape[2] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of) % 2.0):
+                dimension_y_pad_factor = 1
+            else:
+                dimension_y_pad_factor = 0
+
+            if (data_copy.shape[3] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of) % 2.0):
+                dimension_z_pad_factor = 1
+            else:
+                dimension_z_pad_factor = 0
+
+        if dimension_x_pad_factor != 0 or dimension_y_pad_factor != 0 or dimension_z_pad_factor != 0:
+            data_copy = np.pad(data_copy, ((0, 0), (dimension_x_pad_factor, 0), (dimension_y_pad_factor, 0),
+                                           (dimension_z_pad_factor, 0)), mode="edge")
+
+        if new_resolution is None:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            new_resolution = [get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_pad_factor = int(np.abs((new_resolution[0] - data_copy.shape[1]) / 2.0))
+        dimension_y_pad_factor = int(np.abs((new_resolution[1] - data_copy.shape[2]) / 2.0))
+        dimension_z_pad_factor = int(np.abs((new_resolution[2] - data_copy.shape[3]) / 2.0))
+
+        if dimension_x_pad_factor != 0 or dimension_y_pad_factor != 0 or dimension_z_pad_factor != 0:
+            data_copy = np.pad(data_copy, ((0, 0), (dimension_x_pad_factor, dimension_x_pad_factor),
+                                           (dimension_y_pad_factor, dimension_y_pad_factor),
+                                           (dimension_z_pad_factor, dimension_z_pad_factor)), mode="edge")
 
         data_copy = np.expand_dims(data_copy, -1)
 
@@ -87,11 +193,165 @@ def data_upsample(data, data_type, new_resolution=None):
     return data
 
 
-def data_preprocessing(data, data_type, scalers=None):
+def data_downsampling(data, data_type, new_resolution=None):
+    print("data_downsampling")
+
+    for i in range(len(data)):
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
+        else:
+            if data_type == "numpy":
+                data_copy = data[i].copy()
+            else:
+                data_copy = None
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if new_resolution is None:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            new_resolution = [get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_downscale_factor = np.abs(new_resolution[0] / data_copy.shape[1])
+        dimension_y_downscale_factor = np.abs(new_resolution[1] / data_copy.shape[2])
+        dimension_z_downscale_factor = np.abs(new_resolution[2] / data_copy.shape[3])
+
+        if (not np.isclose(dimension_x_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_y_downscale_factor, 1.0, rtol=0.0, atol=1e-04) or
+                not np.isclose(dimension_z_downscale_factor, 1.0, rtol=0.0, atol=1e-04)):
+            data_copy = scipy.ndimage.zoom(data_copy, (1, dimension_x_downscale_factor, dimension_y_downscale_factor,
+                                                       dimension_z_downscale_factor), order=1, mode="nearest",
+                                           prefilter=True)
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        data_copy = np.expand_dims(data_copy, -1)
+
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
+        else:
+            if data_type == "numpy":
+                data[i] = data_copy
+
+    return data
+
+
+def data_downsampling_crop(data, data_type, new_resolution=None):
+    print("data_downsampling_crop")
+
+    for i in range(len(data)):
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "r") as file:
+                data_copy = np.load(file)
+        else:
+            if data_type == "numpy":
+                data_copy = data[i].copy()
+            else:
+                data_copy = None
+
+        data_copy = np.squeeze(data_copy)
+
+        if data_copy.ndim < 4:
+            data_copy = np.expand_dims(data_copy, 0)
+
+        if new_resolution is not None:
+            if data_copy.shape[1] % 2.0 != new_resolution[0] % 2.0:
+                dimension_x_crop_factor = 1
+            else:
+                dimension_x_crop_factor = 0
+
+            if data_copy.shape[2] % 2.0 != new_resolution[1] % 2.0:
+                dimension_y_crop_factor = 1
+            else:
+                dimension_y_crop_factor = 0
+
+            if data_copy.shape[3] % 2.0 != new_resolution[2] % 2.0:
+                dimension_z_crop_factor = 1
+            else:
+                dimension_z_crop_factor = 0
+        else:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            if (data_copy.shape[1] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[1], parameters.data_resample_power_of) % 2.0):
+                dimension_x_crop_factor = 1
+            else:
+                dimension_x_crop_factor = 0
+
+            if (data_copy.shape[2] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[2], parameters.data_resample_power_of) % 2.0):
+                dimension_y_crop_factor = 1
+            else:
+                dimension_y_crop_factor = 0
+
+            if (data_copy.shape[3] % 2.0 !=
+                    get_next_geometric_value(data_copy_shape[3], parameters.data_resample_power_of) % 2.0):
+                dimension_z_crop_factor = 1
+            else:
+                dimension_z_crop_factor = 0
+
+        if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
+            data_copy = data_copy[:, dimension_x_crop_factor or None:, dimension_y_crop_factor or None:,
+                        dimension_z_crop_factor or None:]
+
+        if new_resolution is None:
+            data_copy_shape = list(data_copy.shape)
+
+            for j in range(1, len(data_copy_shape)):
+                if data_copy_shape[j] < parameters.data_window_size:
+                    data_copy_shape[j] = parameters.data_window_size
+
+            new_resolution = [get_previous_geometric_value(data_copy_shape[1], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[2], parameters.data_resample_power_of),
+                              get_previous_geometric_value(data_copy_shape[3], parameters.data_resample_power_of)]
+
+        dimension_x_crop_factor = int(np.abs(np.floor((data_copy.shape[1] - new_resolution[0]) / 2.0)))
+        dimension_y_crop_factor = int(np.abs(np.floor((data_copy.shape[2] - new_resolution[1]) / 2.0)))
+        dimension_z_crop_factor = int(np.abs(np.floor((data_copy.shape[3] - new_resolution[2]) / 2.0)))
+
+        if dimension_x_crop_factor != 0 or dimension_y_crop_factor != 0 or dimension_z_crop_factor != 0:
+            data_copy = data_copy[:, dimension_x_crop_factor or None:-dimension_x_crop_factor or None,
+                        dimension_y_crop_factor or None:-dimension_y_crop_factor or None,
+                        dimension_z_crop_factor or None:-dimension_z_crop_factor or None]
+
+        data_copy = np.expand_dims(data_copy, -1)
+
+        if data_type == "path":
+            with gzip.GzipFile(data[i], "w") as file:
+                np.save(file, data_copy)
+        else:
+            if data_type == "numpy":
+                data[i] = data_copy
+
+    return data
+
+
+def data_preprocessing(data, data_type, preprocessing_steps=None):
     print("data_preprocessing")
 
-    if scalers is None:
-        scalers = []
+    if preprocessing_steps is None:
+        preprocessing_steps = []
+
+        for _ in range(len(data)):
+            preprocessing_steps.append(None)
 
     for i in range(len(data)):
         if data_type == "path":
@@ -106,15 +366,13 @@ def data_preprocessing(data, data_type, scalers=None):
         data_copy_shape = data_copy.shape
         data_copy = data_copy.reshape(-1, 1)
 
-        if len(scalers) < len(data):
-            scaler = StandardScaler()
-            scaler.fit(data_copy)
+        if preprocessing_steps[i] is None:
+            current_preprocessing_steps = [StandardScaler(copy=False)]
+            data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
 
-            scalers.append(scaler)
-
-            data_copy = scaler.transform(data_copy)
+            preprocessing_steps[i] = current_preprocessing_steps
         else:
-            data_copy = scalers[i].inverse_transform(data_copy)
+            data_copy = preprocessing_steps[i][0].inverse_transform(data_copy)
 
         data_copy = data_copy.reshape(data_copy_shape)
 
@@ -125,4 +383,4 @@ def data_preprocessing(data, data_type, scalers=None):
             if data_type == "numpy":
                 data[i] = data_copy
 
-    return data, scalers
+    return data, preprocessing_steps

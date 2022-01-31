@@ -13,11 +13,11 @@ import elasticdeform
 import gzip
 
 
-import main
+import DIP_RDP
 
-if main.reproducible_bool:
+if DIP_RDP.reproducible_bool:
     # 3. Set `numpy` pseudo-random generator at a fixed value
-    np.random.seed(main.seed_value)
+    np.random.seed(DIP_RDP.seed_value)
 
 
 import parameters
@@ -505,7 +505,7 @@ def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_itera
                                                   loss_mask_train_iteration_jitter],
                                                  sigma=parameters.jitter_sigma, points=points, mode="edge")  # noqa
 
-    if main.float_sixteen_bool:
+    if DIP_RDP.float_sixteen_bool:
         x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float16)
         y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float16)
         loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter.astype(np.float16)

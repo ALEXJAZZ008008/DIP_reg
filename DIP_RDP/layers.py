@@ -9,14 +9,14 @@ import tensorflow_addons as tfa
 import tensorflow.keras as k
 
 
-import main
+import DIP_RDP
 
-if main.reproducible_bool:
+if DIP_RDP.reproducible_bool:
     # 3. Set `numpy` pseudo-random generator at a fixed value
-    np.random.seed(main.seed_value)
+    np.random.seed(DIP_RDP.seed_value)
 
     # 4. Set `tensorflow` pseudo-random generator at a fixed value
-    tf.random.set_seed(main.seed_value)
+    tf.random.set_seed(DIP_RDP.seed_value)
 
 
 import losses
@@ -78,8 +78,17 @@ def get_padding(x, size):
     else:
         kernel_padding_3 = int(size[2] / 2) - 1
 
-    if kernel_padding_1 != 0 or kernel_padding_2 != 0 or kernel_padding_3 != 0:
-        x = Padding3D((kernel_padding_1, kernel_padding_2, kernel_padding_3))(x)
+    if kernel_padding_1 != 0:
+        for i in range(kernel_padding_1):
+            x = Padding3D((1, 0, 0))(x)
+
+    if kernel_padding_2 != 0:
+        for i in range(kernel_padding_2):
+            x = Padding3D((0, 1, 0))(x)
+
+    if kernel_padding_3 != 0:
+        for i in range(kernel_padding_3):
+            x = Padding3D((0, 0, 1))(x)
 
     return x
 
