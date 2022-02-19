@@ -1,10 +1,10 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
 
 import tensorflow as tf
-import tensorflow.keras as k
+import keras as k
 
 
 import main
@@ -21,7 +21,7 @@ if main.reproducible_bool:
 def get_input(input_shape):
     print("get_input")
 
-    input_x = k.layers.Input(input_shape)
+    input_x = tf.keras.layers.Input(input_shape)
 
     return input_x, input_x
 
@@ -73,33 +73,33 @@ def get_decoder(x, res_connections):
     layer_groups = [1, 1, 1]
 
     for i in range(len(layer_depth)):
-        x = k.layers.Conv3DTranspose(filters=layer_depth[i],
-                                     kernel_size=layer_kernel_size[i],
-                                     strides=(1, 1, 1),
-                                     dilation_rate=(1, 1, 1),
-                                     groups=layer_groups[i],
-                                     padding="same",
-                                     kernel_initializer="he_normal",
-                                     bias_initializer=k.initializers.Constant(0.0))(x)
+        x = tf.keras.layers.Conv3DTranspose(filters=layer_depth[i],
+                                            kernel_size=layer_kernel_size[i],
+                                            strides=(1, 1, 1),
+                                            dilation_rate=(1, 1, 1),
+                                            groups=layer_groups[i],
+                                            padding="same",
+                                            kernel_initializer="he_normal",
+                                            bias_initializer=tf.keras.initializers.Constant(0.0))(x)
 
-        x = k.layers.UpSampling3D(size=layer_stride[i])(x)
+        x = tf.keras.layers.UpSampling3D(size=layer_stride[i])(x)
 
         res_connections_x = res_connections.pop()
-        x = k.layers.Add()([x, res_connections_x])
+        x = tf.keras.layers.Add()([x, res_connections_x])
 
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], layer_kernel_size[i], (1, 1, 1), layer_groups[i])
 
     # output
-    x = k.layers.Conv3D(filters=1,
-                        kernel_size=(3, 3, 3),
-                        strides=(1, 1, 1),
-                        dilation_rate=(1, 1, 1),
-                        groups=1,
-                        padding="same",
-                        kernel_initializer="he_normal",
-                        bias_initializer=k.initializers.Constant(0.0),
-                        name="output")(x)
+    x = tf.keras.layers.Conv3D(filters=1,
+                               kernel_size=(3, 3, 3),
+                               strides=(1, 1, 1),
+                               dilation_rate=(1, 1, 1),
+                               groups=1,
+                               padding="same",
+                               kernel_initializer="he_normal",
+                               bias_initializer=tf.keras.initializers.Constant(0.0),
+                               name="output")(x)
 
     return x
 
@@ -126,11 +126,11 @@ def get_model(input_shape):
     model = k.Model(inputs=input_x, outputs=[output_x])
 
     if parameters.total_variation_bool:
-        model.compile(optimizer=k.optimizers.SGD(learning_rate=0.01),
+        model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=0.01),
                       loss={"output": losses.mean_square_error_total_variation_loss}, loss_weights=[1.0],
                       metrics=[losses.accuracy_correlation_coefficient])
     else:
-        model.compile(optimizer=k.optimizers.SGD(learning_rate=0.01),
+        model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=0.01),
                       loss={"output": losses.mean_squared_error_loss}, loss_weights=[1.0],
                       metrics=[losses.accuracy_correlation_coefficient])
 

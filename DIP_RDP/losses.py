@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -23,7 +23,7 @@ def log_cosh_loss(y_true, y_pred):
     y_true = tf.cast(y_true, dtype=tf.float32)
     y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-    return parameters.log_cosh_weight * tf.math.reduce_mean(_log_cosh(y_pred - y_true))
+    return tf.math.reduce_mean(_log_cosh(y_pred - y_true))
 
 
 def total_variation_loss(y_true, y_pred):

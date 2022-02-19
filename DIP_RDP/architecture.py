@@ -6,7 +6,7 @@
 import gc
 import tensorflow as tf
 import tensorflow_addons as tfa
-import tensorflow.keras as k
+import keras as k
 
 
 import DIP_RDP
@@ -24,7 +24,7 @@ import losses
 def get_input(input_shape):
     print("get_input")
 
-    x = k.layers.Input(input_shape)
+    x = tf.keras.layers.Input(input_shape)
 
     return x, x
 
@@ -47,16 +47,16 @@ def get_encoder(x):
 
     unet_connections = []
 
-    x = k.layers.Conv3D(filters=1,
-                        kernel_size=(1, 1, 1),
-                        strides=(1, 1, 1),
-                        dilation_rate=(1, 1, 1),
-                        groups=1,
-                        padding="same",
-                        kernel_initializer=k.initializers.Constant(1.0),
-                        bias_initializer=k.initializers.Constant(0.0),
-                        trainable=False,
-                        name="input")(x)
+    x = tf.keras.layers.Conv3D(filters=1,
+                               kernel_size=(1, 1, 1),
+                               strides=(1, 1, 1),
+                               dilation_rate=(1, 1, 1),
+                               groups=1,
+                               padding="same",
+                               kernel_initializer=tf.keras.initializers.Constant(1.0),
+                               bias_initializer=tf.keras.initializers.Constant(0.0),
+                               trainable=False,
+                               name="input")(x)
 
     x = layers.get_gaussian_noise(x, parameters.input_gaussian_sigma)
 
@@ -68,11 +68,11 @@ def get_encoder(x):
 
         x1 = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (2, 2, 2), layer_groups[i])
 
-        x2 = k.layers.MaxPooling3D(pool_size=(2, 2, 2),
-                                   strides=(2, 2, 2),
-                                   padding="valid")(x)
+        x2 = tf.keras.layers.MaxPooling3D(pool_size=(2, 2, 2),
+                                          strides=(2, 2, 2),
+                                          padding="valid")(x)
 
-        x = k.layers.Concatenate()([x1, x2])
+        x = tf.keras.layers.Concatenate()([x1, x2])
 
     return x, unet_connections
 
@@ -90,16 +90,16 @@ def get_latent(x):
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
 
-        latnet_x = k.layers.Conv3D(filters=layer_depth[i],
-                                   kernel_size=(1, 1, 1),
-                                   strides=(1, 1, 1),
-                                   dilation_rate=(1, 1, 1),
-                                   groups=layer_depth[i],
-                                   padding="same",
-                                   kernel_initializer=k.initializers.Constant(1.0),
-                                   bias_initializer=k.initializers.Constant(0.0),
-                                   trainable=False,
-                                   name="latent")(x)
+        latnet_x = tf.keras.layers.Conv3D(filters=layer_depth[i],
+                                          kernel_size=(1, 1, 1),
+                                          strides=(1, 1, 1),
+                                          dilation_rate=(1, 1, 1),
+                                          groups=layer_depth[i],
+                                          padding="same",
+                                          kernel_initializer=tf.keras.initializers.Constant(1.0),
+                                          bias_initializer=tf.keras.initializers.Constant(0.0),
+                                          trainable=False,
+                                          name="latent")(x)
 
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
@@ -130,29 +130,29 @@ def get_decoder(x, unet_connections):
     for i in range(len(layer_depth)):
         x = layers.get_transpose_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
 
-        x = k.layers.UpSampling3D(size=tuple([x * 2 for x in (2, 2, 2)]))(x)
+        x = tf.keras.layers.UpSampling3D(size=tuple([x * 2 for x in (2, 2, 2)]))(x)
 
-        x = k.layers.AveragePooling3D(pool_size=(2, 2, 2),
-                                      strides=(2, 2, 2),
-                                      padding="valid")(x)
+        x = tf.keras.layers.AveragePooling3D(pool_size=(2, 2, 2),
+                                             strides=(2, 2, 2),
+                                             padding="valid")(x)
 
-        x = k.layers.Concatenate()([x, unet_connections.pop()])
+        x = tf.keras.layers.Concatenate()([x, unet_connections.pop()])
 
         for _ in range(layer_layers[i]):
             x = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
 
     x = layers.get_convolution_layer(x, 1, (3, 3, 3), (1, 1, 1), 1)
 
-    x = k.layers.Conv3D(filters=1,
-                        kernel_size=(1, 1, 1),
-                        strides=(1, 1, 1),
-                        dilation_rate=(1, 1, 1),
-                        groups=1,
-                        padding="same",
-                        kernel_initializer=k.initializers.Constant(1.0),
-                        bias_initializer=k.initializers.Constant(0.0),
-                        trainable=False,
-                        name="output")(x)
+    x = tf.keras.layers.Conv3D(filters=1,
+                               kernel_size=(1, 1, 1),
+                               strides=(1, 1, 1),
+                               dilation_rate=(1, 1, 1),
+                               groups=1,
+                               padding="same",
+                               kernel_initializer=tf.keras.initializers.Constant(1.0),
+                               bias_initializer=tf.keras.initializers.Constant(0.0),
+                               trainable=False,
+                               name="output")(x)
 
     return x
 
@@ -178,7 +178,7 @@ def get_model_all(input_shape):
     optimiser = get_optimiser()
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     return model, optimiser, loss
 
@@ -191,7 +191,7 @@ def get_model(input_shape):
     model = k.Model(inputs=input_x, outputs=[output_x])
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     return model
 

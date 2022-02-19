@@ -6,7 +6,6 @@
 import gc
 import tensorflow as tf
 import tensorflow_addons as tfa
-import tensorflow.keras as k
 
 
 import TV
@@ -27,7 +26,7 @@ def get_model_all():
     optimiser = get_optimiser()
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     return optimiser, loss
 
@@ -46,9 +45,6 @@ def get_optimiser():
 def get_loss():
     print("get_loss")
 
-    if parameters.total_variation_bool:
-        loss = losses.log_cosh_total_variation_loss
-    else:
-        loss = losses.log_cosh_loss
+    loss = losses.log_cosh_total_variation_loss
 
     return loss

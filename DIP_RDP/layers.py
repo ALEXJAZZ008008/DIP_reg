@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -6,7 +6,6 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
-import tensorflow.keras as k
 
 
 import DIP_RDP
@@ -27,7 +26,7 @@ def get_gaussian_noise(x, sigma):
     print("get_gaussian_noise")
 
     if sigma > 0.0:
-        x = k.layers.GaussianNoise(sigma)(x)
+        x = tf.keras.layers.GaussianNoise(sigma)(x)
 
     return x
 
@@ -40,7 +39,7 @@ def get_gaussian_noise(x, sigma):
 '''
 
 
-class Padding3D(k.layers.Layer):
+class Padding3D(tf.keras.layers.Layer):
     def __init__(self, padding=(0, 0, 0), **kwargs):
         self.padding = tuple(padding)
         super(Padding3D, self).__init__(**kwargs)
@@ -80,15 +79,15 @@ def get_padding(x, size):
 
     if kernel_padding_1 != 0:
         for i in range(kernel_padding_1):
-            x = Padding3D((1, 0, 0))(x)
+            x = Padding3D((1, 0, 0))(x)  # noqa
 
     if kernel_padding_2 != 0:
         for i in range(kernel_padding_2):
-            x = Padding3D((0, 1, 0))(x)
+            x = Padding3D((0, 1, 0))(x)  # noqa
 
     if kernel_padding_3 != 0:
         for i in range(kernel_padding_3):
-            x = Padding3D((0, 0, 1))(x)
+            x = Padding3D((0, 0, 1))(x)  # noqa
 
     return x
 
@@ -117,9 +116,9 @@ def channel_shuffle(x, groups):
     height, width, depth, in_channels = x.shape.as_list()[1:]
     channels_per_group = in_channels // groups
 
-    x = k.backend.reshape(x, [-1, height, width, depth, groups, channels_per_group])
-    x = k.backend.permute_dimensions(x, (0, 1, 2, 3, 5, 4))  # transpose
-    x = k.backend.reshape(x, [-1, height, width, depth, in_channels])
+    x = tf.keras.backend.reshape(x, [-1, height, width, depth, groups, channels_per_group])
+    x = tf.keras.backend.permute_dimensions(x, (0, 1, 2, 3, 5, 4))  # transpose
+    x = tf.keras.backend.reshape(x, [-1, height, width, depth, in_channels])
 
     return x
 
@@ -128,13 +127,13 @@ def get_channel_shuffle(x, groups):
     print("get_channel_shuffle")
 
     if groups > 1:
-        x = k.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
+        x = tf.keras.layers.Lambda(channel_shuffle, arguments={"groups": groups})(x)
 
     return x
 
 
 # https://github.com/keras-team/keras/blob/v2.6.0/keras/layers/core.py#L1274-L1303
-class ActivityRegularization(k.layers.Layer):
+class ActivityRegularization(tf.keras.layers.Layer):
     """Layer that applies an update to the cost function based input activity.
 
     Input shape:
@@ -164,9 +163,9 @@ def get_dropout(x):
 
     if parameters.dropout > 0.0:
         if len(x.shape) > 2:
-            x = k.layers.SpatialDropout3D(rate=parameters.dropout)(x)
+            x = tf.keras.layers.SpatialDropout3D(rate=parameters.dropout)(x)
         else:
-            x = k.layers.Dropout(rate=parameters.dropout)(x)
+            x = tf.keras.layers.Dropout(rate=parameters.dropout)(x)
 
     return x
 
@@ -175,22 +174,22 @@ def get_convolution_layer(x, depth, size, stride, groups):
     print("get_convolution_layer")
 
     x = get_padding(x, size)
-    x = k.layers.Conv3D(filters=depth,
-                        kernel_size=size,
-                        strides=stride,
-                        dilation_rate=(1, 1, 1),
-                        groups=groups,
-                        padding="valid",
-                        kernel_initializer="he_normal",
-                        bias_initializer=k.initializers.Constant(0.0),
-                        kernel_regularizer=losses.log_cosh_regulariser)(x)
+    x = tf.keras.layers.Conv3D(filters=depth,
+                               kernel_size=size,
+                               strides=stride,
+                               dilation_rate=(1, 1, 1),
+                               groups=groups,
+                               padding="valid",
+                               kernel_initializer="he_normal",
+                               bias_initializer=tf.keras.initializers.Constant(0.0),
+                               kernel_regularizer=losses.log_cosh_regulariser)(x)
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(1.0),
-                       alpha_regularizer=losses.log_cosh_regulariser,
-                       shared_axes=[1, 2, 3])(x)
-    x = ActivityRegularization()(x)
+    x = tf.keras.layers.PReLU(alpha_initializer=tf.keras.initializers.Constant(1.0),
+                              alpha_regularizer=losses.log_cosh_regulariser,
+                              shared_axes=[1, 2, 3])(x)
+    x = ActivityRegularization()(x)  # noqa
     x = get_dropout(x)
 
     return x
@@ -199,22 +198,22 @@ def get_convolution_layer(x, depth, size, stride, groups):
 def get_transpose_convolution_layer(x, depth, size, stride, groups):
     print("get_transpose_convolution_layer")
 
-    x = k.layers.Convolution3DTranspose(filters=depth,
-                                        kernel_size=size,
-                                        strides=stride,
-                                        dilation_rate=(1, 1, 1),
-                                        groups=groups,
-                                        padding="same",
-                                        kernel_initializer="he_normal",
-                                        bias_initializer=k.initializers.Constant(0.0),
-                                        kernel_regularizer=losses.log_cosh_regulariser)(x)
+    x = tf.keras.layers.Convolution3DTranspose(filters=depth,
+                                               kernel_size=size,
+                                               strides=stride,
+                                               dilation_rate=(1, 1, 1),
+                                               groups=groups,
+                                               padding="same",
+                                               kernel_initializer="he_normal",
+                                               bias_initializer=tf.keras.initializers.Constant(0.0),
+                                               kernel_regularizer=losses.log_cosh_regulariser)(x)
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = k.layers.PReLU(alpha_initializer=k.initializers.Constant(1.0),
-                       alpha_regularizer=losses.log_cosh_regulariser,
-                       shared_axes=[1, 2, 3])(x)
-    x = ActivityRegularization()(x)
+    x = tf.keras.layers.PReLU(alpha_initializer=tf.keras.initializers.Constant(1.0),
+                              alpha_regularizer=losses.log_cosh_regulariser,
+                              shared_axes=[1, 2, 3])(x)
+    x = ActivityRegularization()(x)  # noqa
     x = get_dropout(x)
 
     return x

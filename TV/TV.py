@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -10,8 +10,7 @@ import shutil
 import random
 import numpy as np
 import tensorflow as tf
-import tensorflow.keras as k
-from numba import cuda
+# from numba import cuda
 import matplotlib.pyplot as plt
 import nibabel as nib
 import gzip
@@ -43,7 +42,7 @@ if reproducible_bool:
 else:
     random.seed()
 
-device = cuda.get_current_device()
+# device = cuda.get_current_device()
 
 # physical_devices = tf.config.list_physical_devices("GPU")
 
@@ -59,11 +58,11 @@ cpu_bool = False  # if using CPU, set to true: disables mixed precision computat
 # mixed precision float16 computation allows the network to use both float16 and float32 where necessary,
 # this improves performance on the GPU.
 if float_sixteen_bool and not cpu_bool:
-    policy = k.mixed_precision.Policy("mixed_float16")
-    k.mixed_precision.set_global_policy(policy)
+    policy = tf.keras.mixed_precision.Policy("mixed_float16")
+    tf.keras.mixed_precision.set_global_policy(policy)
 else:
-    policy = k.mixed_precision.Policy(tf.dtypes.float32.name)
-    k.mixed_precision.set_global_policy(policy)
+    policy = tf.keras.mixed_precision.Policy(tf.dtypes.float32.name)
+    tf.keras.mixed_precision.set_global_policy(policy)
 
 
 import parameters
@@ -168,7 +167,7 @@ def get_train_data():
     y_files = ["{0}{1}".format(y_path, s) for s in y_files]
 
     example_data = nib.load(y_files[0])
-    voxel_sizes = example_data.get_header().get_zooms()
+    voxel_sizes = example_data.header.get_zooms()
 
     data_mask_path = "{0}/data_mask/".format(data_path)
 
@@ -249,7 +248,7 @@ def get_train_data():
 
     for i in range(len(y_files)):
         current_volume = nib.load(y_files[i])
-        current_array = current_volume.get_data()
+        current_array = current_volume.get_fdata()
 
         current_array = normalise_voxel_sizes(current_array, voxel_sizes)
 
@@ -294,7 +293,7 @@ def get_train_data():
             os.makedirs(gt_train_output_path, mode=0o770)
 
         for i in range(len(gt_files)):
-            current_array = nib.load(gt_files[i]).get_data()
+            current_array = nib.load(gt_files[i]).get_fdata()
 
             current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
@@ -381,7 +380,7 @@ def train_step(optimiser, loss, x_train_iteration, y_train_iteration, loss_mask_
     loss_list.append(current_loss)
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     # Use the gradient tape to automatically retrieve
     # the gradients of the trainable variables with respect to the loss.
@@ -394,7 +393,7 @@ def train_step(optimiser, loss, x_train_iteration, y_train_iteration, loss_mask_
     optimiser.apply_gradients(zip(grads, [x_train_iteration]))
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     return x_train_iteration, loss_list
 
@@ -514,16 +513,16 @@ def output_patient_time_point_predictions(window_data_paths, example_data, windo
         output_array = np.nansum(np.asarray(output_arrays), axis=0)
         output_array = np.nan_to_num(output_array, copy=False)
     else:
-        output_array = nib.load(window_data_paths[0]).get_data()
+        output_array = nib.load(window_data_paths[0]).get_fdata()
 
     output_array = np.squeeze(preprocessing.data_downsampling_crop([output_array], "numpy", full_input_shape)[0])
 
-    example_data_header = example_data.get_header()
+    example_data_header = example_data.header
 
     output_array = np.squeeze(preprocessing.data_downsampling([output_array], "numpy",
                                                               example_data_header.get_data_shape())[0])
 
-    output_volume = nib.Nifti1Image(output_array, example_data.get_affine(), example_data_header)
+    output_volume = nib.Nifti1Image(output_array, example_data.affine, example_data_header)
 
     current_data_path = "{0}/{1}_{2}.nii.gz".format(current_output_path, str(i), current_output_prefix)
     nib.save(output_volume, current_data_path)
@@ -780,7 +779,7 @@ def main(input_data_path=None, input_output_path=None):
     # import python_email_notification
     # python_email_notification.main()
 
-    device.reset()
+    # device.reset()
 
     # transcript.transcript_stop(logfile)
 

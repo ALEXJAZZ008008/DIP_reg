@@ -3,21 +3,21 @@
 # For internal research only.
 
 
-import tensorflow.keras as k
+import tensorflow as tf
 
 
 def get_convolution_layer(x, depth, size, stride, groups):
     print("get_convolution_layer")
 
-    x = k.layers.Conv3D(filters=depth,
-                        kernel_size=size,
-                        strides=stride,
-                        dilation_rate=(1, 1, 1),
-                        groups=groups,
-                        padding="same",
-                        kernel_initializer="he_normal",
-                        bias_initializer=k.initializers.Constant(0.0))(x)
-    x = k.layers.BatchNormalization()(x)
-    x = k.layers.ReLU(negative_slope=0.2)(x)
+    x = tf.keras.layers.Conv3D(filters=depth,
+                               kernel_size=size,
+                               strides=stride,
+                               dilation_rate=(1, 1, 1),
+                               groups=groups,
+                               padding="same",
+                               kernel_initializer="he_normal",
+                               bias_initializer=tf.keras.initializers.Constant(0.0))(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.ReLU(negative_slope=0.2)(x)
 
     return x

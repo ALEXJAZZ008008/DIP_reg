@@ -9,9 +9,6 @@ import os
 data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output/static_mean_thorax_simulation_noisy/".format(os.getcwd())
 
-# data_path = "{0}/DIP_RDP_data/insert_inpainting_test/".format(os.path.dirname(os.getcwd()))
-# output_path = "{0}/output/insert_inpainting_test/".format(os.getcwd())
-
 gaussian_path = ""
 
 data_window_size = 128
@@ -45,7 +42,7 @@ jitter_magnitude = 0
 
 elastic_jitter_bool = False
 elastic_jitter_sigma = 0.0
-elastic_jitter_points_iterations = 6
+elastic_jitter_points_iterations = 8
 
 
 input_gaussian_sigma = 0.0
@@ -60,9 +57,7 @@ bayesian_output_bool = False
 bayesian_iterations = 1
 
 
-log_cosh_weight = 1e00
-
-total_variation_bool = False
+total_variation_bool = True
 total_variation_weight = 0.0
 
 relative_difference_bool = False

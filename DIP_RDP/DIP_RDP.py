@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -13,7 +13,6 @@ import scipy.constants
 import scipy.stats
 import scipy.ndimage
 import tensorflow as tf
-import tensorflow.keras as k
 from numba import cuda
 import pickle
 import matplotlib.pyplot as plt
@@ -63,11 +62,11 @@ cpu_bool = False  # if using CPU, set to true: disables mixed precision computat
 # mixed precision float16 computation allows the network to use both float16 and float32 where necessary,
 # this improves performance on the GPU.
 if float_sixteen_bool and not cpu_bool:
-    policy = k.mixed_precision.Policy("mixed_float16")
-    k.mixed_precision.set_global_policy(policy)
+    policy = tf.keras.mixed_precision.Policy("mixed_float16")
+    tf.keras.mixed_precision.set_global_policy(policy)
 else:
-    policy = k.mixed_precision.Policy(tf.dtypes.float32.name)
-    k.mixed_precision.set_global_policy(policy)
+    policy = tf.keras.mixed_precision.Policy(tf.dtypes.float32.name)
+    tf.keras.mixed_precision.set_global_policy(policy)
 
 
 import parameters
@@ -172,7 +171,7 @@ def get_train_data():
     y_files = ["{0}{1}".format(y_path, s) for s in y_files]
 
     example_data = nib.load(y_files[0])
-    voxel_sizes = example_data.get_header().get_zooms()
+    voxel_sizes = example_data.header.get_zooms()
 
     data_mask_path = "{0}/data_mask/".format(data_path)
 
@@ -189,7 +188,7 @@ def get_train_data():
             os.makedirs(data_mask_train_output_path, mode=0o770)
 
         for i in range(len(data_mask_files)):
-            current_array = nib.load(data_mask_files[i]).get_data()
+            current_array = nib.load(data_mask_files[i]).get_fdata()
 
             current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
@@ -220,7 +219,7 @@ def get_train_data():
         loss_mask_files = ["{0}{1}".format(loss_mask_path, s) for s in loss_mask_files]
 
         for i in range(len(loss_mask_files)):
-            current_array = nib.load(loss_mask_files[i]).get_data()
+            current_array = nib.load(loss_mask_files[i]).get_fdata()
 
             current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
@@ -254,7 +253,7 @@ def get_train_data():
 
     for i in range(len(y_files)):
         current_volume = nib.load(y_files[i])
-        current_array = current_volume.get_data()
+        current_array = current_volume.get_fdata()
 
         current_array = normalise_voxel_sizes(current_array, voxel_sizes)
 
@@ -359,7 +358,7 @@ def get_train_data():
             os.makedirs(gt_train_output_path, mode=0o770)
 
         for i in range(len(gt_files)):
-            current_array = nib.load(gt_files[i]).get_data()
+            current_array = nib.load(gt_files[i]).get_fdata()
 
             current_array = normalise_voxel_sizes(current_array, voxel_sizes)
             current_array, _ = get_data_windows(current_array)
@@ -452,15 +451,15 @@ def get_model_memory_usage(batch_size, model):
 
         shapes_mem_count = shapes_mem_count + single_layer_mem
 
-    trainable_count = np.sum([k.backend.count_params(p) for p in model.trainable_weights])
-    non_trainable_count = np.sum([k.backend.count_params(p) for p in model.non_trainable_weights])
+    trainable_count = np.sum([tf.keras.backend.count_params(p) for p in model.trainable_weights])
+    non_trainable_count = np.sum([tf.keras.backend.count_params(p) for p in model.non_trainable_weights])
 
     number_size = 4.0
 
-    if k.backend.floatx() == "float16":
+    if tf.keras.backend.floatx() == "float16":
         number_size = 2.0
 
-    if k.backend.floatx() == "float64":
+    if tf.keras.backend.floatx() == "float64":
         number_size = 8.0
 
     total_memory = number_size * (batch_size * shapes_mem_count + trainable_count + non_trainable_count)
@@ -473,7 +472,7 @@ def get_bayesian_train_prediction(model, x_train_iteration):
     x_prediction_1 = model(x_train_iteration, training=True)
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     x_prediction = tf.math.reduce_mean([x_prediction_1], axis=0)
 
@@ -595,7 +594,7 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
             break
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     # Use the gradient tape to automatically retrieve
     # the gradients of the trainable variables with respect to the loss.
@@ -608,7 +607,7 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
     optimiser.apply_gradients(zip(grads, model.trainable_weights))
 
     gc.collect()
-    k.backend.clear_session()
+    tf.keras.backend.clear_session()
 
     return model, loss_list, uncertainty, previous_model_weight_list, previous_optimiser_weight_list
 
@@ -625,7 +624,7 @@ def get_bayesian_test_prediction(model, x_train_iteration, bayesian_iteration, b
         x_prediction_list.append(model(x_train_iteration, training=bayesian_bool))
 
         gc.collect()
-        k.backend.clear_session()
+        tf.keras.backend.clear_session()
 
     x_prediction = tf.math.reduce_mean(x_prediction_list, axis=0)
 
@@ -776,7 +775,7 @@ def output_patient_time_point_predictions(window_data_paths, example_data, windo
         for l in range(number_of_windows):
             current_overlap_index = overlap_index * l
 
-            current_data = nib.load(window_data_paths[l]).get_data()
+            current_data = nib.load(window_data_paths[l]).get_fdata()
 
             if l != 0:
                 current_data[:, :, :overlap_size] = current_data[:, :, :overlap_size] * output_ramp_filter_increasing
@@ -795,16 +794,16 @@ def output_patient_time_point_predictions(window_data_paths, example_data, windo
         output_array = np.nansum(np.asarray(output_arrays), axis=0)
         output_array = np.nan_to_num(output_array, copy=False)
     else:
-        output_array = nib.load(window_data_paths[0]).get_data()
+        output_array = nib.load(window_data_paths[0]).get_fdata()
 
     output_array = np.squeeze(preprocessing.data_downsampling_crop([output_array], "numpy", full_input_shape)[0])
 
-    example_data_header = example_data.get_header()
+    example_data_header = example_data.header
 
     output_array = np.squeeze(preprocessing.data_downsampling([output_array], "numpy",
                                                               example_data_header.get_data_shape())[0])
 
-    output_volume = nib.Nifti1Image(output_array, example_data.get_affine(), example_data_header)
+    output_volume = nib.Nifti1Image(output_array, example_data.affine, example_data_header)
 
     current_data_path = "{0}/{1}_{2}.nii.gz".format(current_output_path, str(i), current_output_prefix)
     nib.save(output_volume, current_data_path)
@@ -835,8 +834,8 @@ def train_model():
 
     print("Memory usage:\t{0}".format(str(get_model_memory_usage(1, model))))
 
-    k.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
-                       show_layer_names=True, expand_nested=True)
+    tf.keras.utils.plot_model(model, to_file="{0}/model.pdf".format(output_path), show_shapes=True, show_dtype=True,
+                              show_layer_names=True, expand_nested=True)
 
     output_paths = []
     output_uncertainty_paths = []
@@ -1215,8 +1214,8 @@ def main(input_data_path=None, input_output_path=None):
     if os.path.exists(logfile_path):
         os.remove(logfile_path)
 
-    import transcript
-    logfile = transcript.transcript_start(logfile_path)
+    # import transcript
+    # logfile = transcript.transcript_start(logfile_path)
 
     output_paths, output_uncertainty_paths = train_model()
 
@@ -1225,7 +1224,7 @@ def main(input_data_path=None, input_output_path=None):
 
     device.reset()
 
-    transcript.transcript_stop(logfile)
+    # transcript.transcript_stop(logfile)
 
     return output_paths, output_uncertainty_paths
 

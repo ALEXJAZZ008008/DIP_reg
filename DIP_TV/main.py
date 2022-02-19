@@ -1,4 +1,4 @@
-# Copyright University College London 2021
+# Copyright University College London 2021, 2022
 # Author: Alexander Whitehead, Institute of Nuclear Medicine, UCL
 # For internal research only.
 
@@ -9,7 +9,6 @@ import shutil
 import random
 import numpy as np
 import tensorflow as tf
-import tensorflow.keras as k
 import matplotlib.pyplot as plt
 import nibabel as nib
 import gzip
@@ -42,7 +41,6 @@ else:
     random.seed()
 
 
-import transcript
 import parameters
 import preprocessing
 import architecture
@@ -54,11 +52,11 @@ cpu_bool = False  # if using CPU, set to true: disables mixed precision computat
 # mixed precision float16 computation allows the network to use both float16 and float32 where necessary,
 # this improves performance on the GPU.
 if float_sixteen_bool and not cpu_bool:
-    policy = k.mixed_precision.Policy("mixed_float16")
-    k.mixed_precision.set_global_policy(policy)
+    policy = tf.keras.mixed_precision.Policy("mixed_float16")
+    tf.keras.mixed_precision.set_global_policy(policy)
 else:
-    policy = k.mixed_precision.Policy(tf.dtypes.float32.name)
-    k.mixed_precision.set_global_policy(policy)
+    policy = tf.keras.mixed_precision.Policy(tf.dtypes.float32.name)
+    tf.keras.mixed_precision.set_global_policy(policy)
 
 data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output/DIP_TV/".format(os.getcwd())
@@ -137,6 +135,8 @@ def get_train_data():
     y_files.sort(key=human_sorting)
     y_files = ["{0}{1}".format(y_path, s) for s in y_files]
 
+    example_data = nib.load(y_files[0])
+
     x = []
     y = []
 
@@ -157,7 +157,7 @@ def get_train_data():
 
     for i in range(len(y_files)):
         current_volume = nib.load(y_files[i])
-        current_array = current_volume.get_data()
+        current_array = current_volume.get_fdata()
 
         if full_current_shape is None:
             full_current_shape = current_array.shape
@@ -200,7 +200,7 @@ def get_train_data():
             os.makedirs(gt_train_output_path, mode=0o770)
 
         for i in range(len(gt_files)):
-            current_array = nib.load(gt_files[i]).get_data()
+            current_array = nib.load(gt_files[i]).get_fdata()
 
             current_array, _ = get_data_windows(current_array)
 
@@ -215,13 +215,14 @@ def get_train_data():
     else:
         gt = None
 
-    return x, y, current_volume, full_current_shape, windowed_full_input_axial_size, current_shape, gt
+    return x, y, example_data, current_volume, full_current_shape, windowed_full_input_axial_size, current_shape, gt
 
 
 def get_preprocessed_train_data():
     print("get_preprocessed_train_data")
 
-    x, y, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = get_train_data()
+    x, y, example_data, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, gt = \
+        get_train_data()
 
     x = preprocessing.data_upsample(x, "path")
     y = preprocessing.data_upsample(y, "path")
@@ -231,7 +232,7 @@ def get_preprocessed_train_data():
     y, input_preprocessing = preprocessing.data_preprocessing(y, "path")
     gt, _ = preprocessing.data_preprocessing(gt, "path")
 
-    return x, y, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, input_preprocessing, gt
+    return x, y, example_data, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, input_preprocessing, gt
 
 
 # https://stackoverflow.com/questions/43137288/how-to-determine-needed-memory-of-keras-model
@@ -261,15 +262,15 @@ def get_model_memory_usage(batch_size, model):
 
         shapes_mem_count = shapes_mem_count + single_layer_mem
 
-    trainable_count = np.sum([k.backend.count_params(p) for p in model.trainable_weights])
-    non_trainable_count = np.sum([k.backend.count_params(p) for p in model.non_trainable_weights])
+    trainable_count = np.sum([tf.keras.backend.count_params(p) for p in model.trainable_weights])
+    non_trainable_count = np.sum([tf.keras.backend.count_params(p) for p in model.non_trainable_weights])
 
     number_size = 4.0
 
-    if k.backend.floatx() == 'float16':
+    if tf.keras.backend.floatx() == 'float16':
         number_size = 2.0
 
-    if k.backend.floatx() == 'float64':
+    if tf.keras.backend.floatx() == 'float64':
         number_size = 8.0
 
     total_memory = number_size * (batch_size * shapes_mem_count + trainable_count + non_trainable_count)
@@ -304,8 +305,8 @@ def output_window_predictions(x_prediction, input_volume, window_input_shape, in
     return current_data_path
 
 
-def output_patient_time_point_predictions(window_data_paths, windowed_full_input_axial_size, full_input_shape,
-                                          current_output_path, i):
+def output_patient_time_point_predictions(window_data_paths, example_data, windowed_full_input_axial_size,
+                                          full_input_shape, current_output_path, i):
     print("output_patient_time_point_predictions")
 
     if len(window_data_paths) > 1:
@@ -325,7 +326,7 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
             current_output_array = np.zeros((full_input_shape[0], full_input_shape[1], windowed_full_input_axial_size))
 
             current_output_array[:, :, current_overlap_index:current_overlap_index + parameters.data_window_size] = \
-                nib.load(window_data_paths[l]).get_data()
+                nib.load(window_data_paths[l]).get_fdata()
             current_output_array[np.isclose(current_output_array, 0.0)] = np.nan
 
             output_arrays.append(current_output_array)
@@ -333,11 +334,11 @@ def output_patient_time_point_predictions(window_data_paths, windowed_full_input
         output_array = np.nanmean(np.asarray(output_arrays), axis=0)
         output_array = np.nan_to_num(output_array)
     else:
-        output_array = nib.load(window_data_paths[0]).get_data()
+        output_array = nib.load(window_data_paths[0]).get_fdata()
 
     output_array = np.squeeze(preprocessing.data_upsample([output_array], "numpy", full_input_shape)[0])
 
-    output_volume = nib.Nifti1Image(output_array, np.eye(4), nib.Nifti1Header())
+    output_volume = nib.Nifti1Image(output_array, example_data.affine, example_data.header)
 
     current_data_path = "{0}/{1}.nii.gz".format(current_output_path, str(i))
     nib.save(output_volume, current_data_path)
@@ -349,8 +350,7 @@ def train_model():
     print("train_model")
 
     # get data and lables
-    x, y, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, input_preprocessing, \
-    gt = \
+    x, y, example_data, input_volume, full_input_shape, windowed_full_input_axial_size, window_input_shape, input_preprocessing, gt = \
         get_preprocessed_train_data()
 
     for i in range(len(y)):
@@ -390,8 +390,8 @@ def train_model():
 
             print("Memory usage:\t{0}".format(str(get_model_memory_usage(1, model))))
 
-            k.utils.plot_model(model, to_file="{0}/model.pdf".format(window_output_path), show_shapes=True,
-                               show_dtype=True, show_layer_names=True, expand_nested=True)
+            tf.keras.utils.plot_model(model, to_file="{0}/model.pdf".format(window_output_path), show_shapes=True,
+                                      show_dtype=True, show_layer_names=True, expand_nested=True)
 
             with gzip.GzipFile(x[i], "r") as file:
                 x_train_iteration = np.asarray([np.load(file)[j]])
@@ -483,7 +483,7 @@ def train_model():
             current_window_data_paths.append(output_window_predictions(x_prediction, input_volume, window_input_shape,
                                                                        input_preprocessing, window_output_path, i, j))
 
-        output_patient_time_point_predictions(current_window_data_paths, windowed_full_input_axial_size,
+        output_patient_time_point_predictions(current_window_data_paths, example_data, windowed_full_input_axial_size,
                                               full_input_shape, patient_output_path, i)
 
 
@@ -504,11 +504,12 @@ def main():
     if os.path.exists(logfile_path):
         os.remove(logfile_path)
 
-    transcript.start(logfile_path)
+    import transcript
+    logfile = transcript.transcript_start(logfile_path)
 
     train_model()
 
-    transcript.stop()
+    transcript.transcript_stop(logfile)
 
     return True
 
