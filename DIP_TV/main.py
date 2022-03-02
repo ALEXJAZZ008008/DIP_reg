@@ -58,6 +58,14 @@ else:
     policy = tf.keras.mixed_precision.Policy(tf.dtypes.float32.name)
     tf.keras.mixed_precision.set_global_policy(policy)
 
+
+gpus = tf.config.list_physical_devices("GPU")
+
+if gpus:
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+
+
 data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output/DIP_TV/".format(os.getcwd())
 

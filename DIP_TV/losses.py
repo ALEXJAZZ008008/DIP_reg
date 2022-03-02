@@ -40,17 +40,17 @@ def total_variation(images):
 
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences and summing over the appropriate axis.
-    tot_var = (tf.math.reduce_mean(tf.math.abs(pixel_dif1), axis=sum_axis) +
-               tf.math.reduce_mean(tf.math.abs(pixel_dif2), axis=sum_axis) +
-               tf.math.reduce_mean(tf.math.abs(pixel_dif3), axis=sum_axis))
+    tot_var = tf.reduce_mean((tf.math.reduce_mean(tf.math.abs(pixel_dif1), axis=sum_axis) +
+                              tf.math.reduce_mean(tf.math.abs(pixel_dif2), axis=sum_axis) +
+                              tf.math.reduce_mean(tf.math.abs(pixel_dif3), axis=sum_axis)))
 
     return tot_var
 
 
 def total_variation_loss(_, y_pred):
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-    return tf.reduce_mean(total_variation(y_pred))
+    return parameters.total_variation_weight * tf.reduce_mean(total_variation(y_pred))
 
 
 def mean_square_error_total_variation_loss(y_true, y_pred):

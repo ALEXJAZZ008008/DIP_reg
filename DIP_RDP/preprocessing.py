@@ -370,7 +370,7 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
         data_copy = data_copy.reshape(-1, 1)
 
         if preprocessing_steps[i] is None:
-            current_preprocessing_steps = [StandardScaler(copy=False)]
+            current_preprocessing_steps = [StandardScaler()]
             data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
 
             preprocessing_steps[i] = current_preprocessing_steps

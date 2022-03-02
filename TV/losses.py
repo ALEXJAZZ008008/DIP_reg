@@ -43,24 +43,17 @@ def total_variation(images):
 
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences and summing over the appropriate axis.
-    tot_var = (tf.math.reduce_mean(tf.math.abs(pixel_dif1), axis=sum_axis) +
-               tf.math.reduce_mean(tf.math.abs(pixel_dif2), axis=sum_axis) +
-               tf.math.reduce_mean(tf.math.abs(pixel_dif3), axis=sum_axis))
+    tot_var = tf.reduce_mean((tf.math.reduce_mean(tf.math.abs(pixel_dif1), axis=sum_axis) +
+                              tf.math.reduce_mean(tf.math.abs(pixel_dif2), axis=sum_axis) +
+                              tf.math.reduce_mean(tf.math.abs(pixel_dif3), axis=sum_axis)))
 
     return tot_var
 
 
-def total_variation_loss(y_true, y_pred):
+def total_variation_loss(_, y_pred):
     y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-    return tf.reduce_mean(total_variation(y_pred))
-
-
-def log_cosh_total_variation_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float32)
-    y_pred = tf.cast(y_pred, dtype=tf.float32)
-
-    return parameters.total_variation_weight * total_variation_loss(y_true, y_pred)
+    return parameters.total_variation_weight * tf.reduce_mean(total_variation(y_pred))
 
 
 def correlation_coefficient_loss(y_true, y_pred):
@@ -81,9 +74,14 @@ def correlation_coefficient_accuracy(y_true, y_pred):
 
 def scale_accuracy(y_true, y_pred):
     def _scale_accuracy(_y_true, _y_pred):
-        return 1.0 - tf.math.erf(tf.math.abs(_y_pred - _y_true) / tf.math.abs(_y_true))
+        return 1.0 - \
+               tf.math.erf(parameters.scale_accuracy_scale * (log_cosh_loss(_y_true, _y_pred) /
+                                                              log_cosh_loss(_y_true, tf.zeros(tf.shape(_y_true)))))
 
     y_true = tf.cast(y_true, dtype=tf.float32)
     y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-    return _scale_accuracy(tf.math.reduce_mean(y_true), tf.math.reduce_mean(y_pred))
+    y_true = y_true - tf.math.reduce_min(y_true)
+    y_pred = y_pred - tf.math.reduce_min(y_pred)
+
+    return _scale_accuracy(tf.math.reduce_sum(y_true), tf.math.reduce_sum(y_pred))

@@ -13,7 +13,7 @@ import scipy.constants
 import scipy.stats
 import scipy.ndimage
 import tensorflow as tf
-from numba import cuda
+# from numba import cuda
 import pickle
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -46,7 +46,7 @@ if reproducible_bool:
 else:
     random.seed()
 
-device = cuda.get_current_device()
+# device = cuda.get_current_device()
 
 # physical_devices = tf.config.list_physical_devices("GPU")
 
@@ -67,6 +67,13 @@ if float_sixteen_bool and not cpu_bool:
 else:
     policy = tf.keras.mixed_precision.Policy(tf.dtypes.float32.name)
     tf.keras.mixed_precision.set_global_policy(policy)
+
+
+# gpus = tf.config.list_physical_devices("GPU")
+
+# if gpus:
+#     for gpu in gpus:
+#         tf.config.experimental.set_memory_growth(gpu, True)
 
 
 import parameters
@@ -547,17 +554,13 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
             logits = logits * loss_mask_train_iteration
 
             # Compute the loss value for this minibatch.
-            current_loss = tf.math.reduce_sum([loss(current_y_train_iteration, logits),
-                                               parameters.scale_weight *
-                                               losses.log_cosh_loss(tf.math.reduce_mean(y_train_iteration_jitter),
-                                                                    tf.math.reduce_mean(logits)),
+            current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
+                                               losses.scale_loss(y_train_iteration_jitter, logits),
                                                parameters.uncertainty_weight * uncertainty,
                                                parameters.kernel_regulariser_weight *
-                                               tf.math.reduce_mean(model.losses[::3]),
+                                               tf.math.reduce_mean(model.losses[::2]),
                                                parameters.activity_regulariser_weight *
-                                               tf.math.reduce_mean(model.losses[1::3]),
-                                               parameters.prelu_regulariser_weight *
-                                               tf.math.reduce_mean(model.losses[2::3])])
+                                               tf.math.reduce_mean(model.losses[1::2])])
 
         loss_list.append(current_loss)
 
@@ -1222,7 +1225,7 @@ def main(input_data_path=None, input_output_path=None):
     # import python_email_notification
     # python_email_notification.main()
 
-    device.reset()
+    # device.reset()
 
     # transcript.transcript_stop(logfile)
 

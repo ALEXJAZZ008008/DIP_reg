@@ -5,7 +5,6 @@
 
 import gc
 import tensorflow as tf
-import tensorflow_addons as tfa
 
 
 import TV
@@ -15,7 +14,6 @@ if TV.reproducible_bool:
     tf.random.set_seed(TV.seed_value)
 
 
-import parameters
 import losses
 
 
@@ -34,10 +32,7 @@ def get_model_all():
 def get_optimiser():
     print("get_optimiser")
 
-    if parameters.weight_decay > 0.0:
-        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)(weight_decay=parameters.weight_decay)  # noqa
-    else:
-        optimiser = tf.keras.optimizers.Nadam()
+    optimiser = tf.keras.optimizers.Adam(amsgrad=True)
 
     return optimiser
 
@@ -45,6 +40,6 @@ def get_optimiser():
 def get_loss():
     print("get_loss")
 
-    loss = losses.log_cosh_total_variation_loss
+    loss = losses.total_variation_loss
 
     return loss

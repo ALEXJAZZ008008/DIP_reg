@@ -4,10 +4,11 @@
 
 
 import os
+import numpy as np
 
 
-data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
-output_path = "{0}/output/static_mean_thorax_simulation_noisy/".format(os.getcwd())
+data_path = "{0}/DIP_RDP_data/static_thorax_simulation/".format(os.path.dirname(os.getcwd()))
+output_path = "{0}/output/static_thorax_simulation/".format(os.getcwd())
 
 gaussian_path = ""
 
@@ -26,9 +27,9 @@ input_gaussian_weight = 1.0
 
 model_path = ""
 
-layer_layers = [2, 2, 2, 2, 2, 2, 1]
-layer_depth = [1, 2, 4, 8, 16, 32, 64]
-layer_groups = [1, 1, 1, 1, 1, 1, 1]
+layer_layers = [2, 2, 2, 2, 2, 2, 2, 2]
+layer_depth = [1, 2, 4, 8, 16, 32, 64, 128]
+layer_groups = [1, 1, 1, 1, 1, 1, 1, 1]
 
 
 new_model_patient_bool = False
@@ -50,11 +51,14 @@ skip_gaussian_sigma = 0.0
 layer_gaussian_sigma = 0.0
 
 
-dropout = 0.0
+dropout = 0.0 / layer_depth[-1]
 
 bayesian_test_bool = False
-bayesian_output_bool = False
-bayesian_iterations = 1
+bayesian_output_bool = True
+bayesian_iterations = int(np.ceil(dropout * 100.0))
+
+if bayesian_iterations < 2:
+    bayesian_iterations = 2
 
 
 total_variation_bool = True
@@ -64,13 +68,13 @@ relative_difference_bool = False
 relative_difference_weight = 0.0
 relative_difference_edge_preservation_weight = 0.0
 
-scale_weight = 0.0
+scale_loss_weight = 0.0
+scale_accuracy_scale = 1e00
 
 uncertainty_weight = 0.0
 
 kernel_regulariser_weight = 0.0
 activity_regulariser_weight = 0.0
-prelu_regulariser_weight = 0.0
 
 
 weight_decay = 0.0

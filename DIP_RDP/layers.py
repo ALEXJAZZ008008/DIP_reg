@@ -161,7 +161,7 @@ class ActivityRegularization(tf.keras.layers.Layer):
 def get_dropout(x):
     print("get_dropout")
 
-    if parameters.dropout > 0.0:
+    if parameters.dropout > 0.0 and x.shape[-1] > 1:
         if len(x.shape) > 2:
             x = tf.keras.layers.SpatialDropout3D(rate=parameters.dropout)(x)
         else:
@@ -186,9 +186,7 @@ def get_convolution_layer(x, depth, size, stride, groups):
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = tf.keras.layers.PReLU(alpha_initializer=tf.keras.initializers.Constant(1.0),
-                              alpha_regularizer=losses.log_cosh_regulariser,
-                              shared_axes=[1, 2, 3])(x)
+    x = tf.keras.layers.Lambda(tfa.activations.mish)(x)
     x = ActivityRegularization()(x)  # noqa
     x = get_dropout(x)
 
@@ -210,9 +208,7 @@ def get_transpose_convolution_layer(x, depth, size, stride, groups):
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = tf.keras.layers.PReLU(alpha_initializer=tf.keras.initializers.Constant(1.0),
-                              alpha_regularizer=losses.log_cosh_regulariser,
-                              shared_axes=[1, 2, 3])(x)
+    x = tf.keras.layers.Lambda(tfa.activations.mish)(x)
     x = ActivityRegularization()(x)  # noqa
     x = get_dropout(x)
 
