@@ -17,8 +17,8 @@ if main.reproducible_bool:
 
 # https://github.com/keras-team/keras/blob/master/keras/losses.py#L256-L310
 def mean_squared_error_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
     return tf.keras.backend.mean(tf.math.squared_difference(y_pred, y_true), axis=-1)
 
@@ -54,8 +54,8 @@ def total_variation_loss(_, y_pred):
 
 
 def mean_square_error_total_variation_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
     return ((mean_squared_error_loss(y_true, y_pred)) +
             (parameters.total_variation_weight * total_variation_loss(y_true, y_pred))) / 2.0
@@ -63,8 +63,8 @@ def mean_square_error_total_variation_loss(y_true, y_pred):
 
 # https://stackoverflow.com/questions/46619869/how-to-specify-the-correlation-coefficient-as-the-loss-function-in-keras
 def correlation_coefficient_loss(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
     mx = tf.keras.backend.mean(y_true)
     my = tf.keras.backend.mean(y_pred)
@@ -83,7 +83,7 @@ def correlation_coefficient_loss(y_true, y_pred):
 
 
 def accuracy_correlation_coefficient(y_true, y_pred):
-    y_true = tf.cast(y_true, dtype=tf.float64)
-    y_pred = tf.cast(y_pred, dtype=tf.float64)
+    y_true = tf.cast(y_true, dtype=tf.float32)
+    y_pred = tf.cast(y_pred, dtype=tf.float32)
 
     return (correlation_coefficient_loss(y_true, y_pred) * -1.0) + 1.0

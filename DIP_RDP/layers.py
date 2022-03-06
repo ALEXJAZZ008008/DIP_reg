@@ -146,7 +146,7 @@ class ActivityRegularization(tf.keras.layers.Layer):
     """
 
     def __init__(self, **kwargs):
-        super(ActivityRegularization, self).__init__(activity_regularizer=losses.log_cosh_regulariser, **kwargs)
+        super(ActivityRegularization, self).__init__(activity_regularizer=losses.l1_regulariser, **kwargs)
         self.supports_masking = True
 
     def compute_output_shape(self, input_shape):
@@ -186,7 +186,9 @@ def get_convolution_layer(x, depth, size, stride, groups):
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = tf.keras.layers.Lambda(tfa.activations.mish)(x)
+    x = tf.keras.layers.PReLU(alpha_initializer=tf.keras.initializers.Constant(1.0),
+                              alpha_regularizer=losses.l1_regulariser,
+                              shared_axes=[1, 2, 3])(x)
     x = ActivityRegularization()(x)  # noqa
     x = get_dropout(x)
 
@@ -208,7 +210,9 @@ def get_transpose_convolution_layer(x, depth, size, stride, groups):
     x = get_channel_shuffle(x, groups)
     x = tfa.layers.GroupNormalization(groups=groups)(x)  # noqa
     x = get_gaussian_noise(x, parameters.layer_gaussian_sigma)
-    x = tf.keras.layers.Lambda(tfa.activations.mish)(x)
+    x = tf.keras.layers.PReLU(alpha_initializer=tf.keras.initializers.Constant(1.0),
+                              alpha_regularizer=losses.l1_regulariser,
+                              shared_axes=[1, 2, 3])(x)
     x = ActivityRegularization()(x)  # noqa
     x = get_dropout(x)
 

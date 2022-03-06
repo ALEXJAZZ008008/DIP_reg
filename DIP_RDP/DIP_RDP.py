@@ -85,6 +85,8 @@ import losses
 data_path = None
 output_path = None
 
+model_path = None
+
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
 def atoi(string):
@@ -307,9 +309,12 @@ def get_train_data():
                 current_array, _ = preprocessing.data_preprocessing(current_array, "numpy")
 
             if gaussian_noise is None:
-                gaussian_update_path = "{0}/gaussian.npy.gk".format(parameters.gaussian_path)
+                if parameters.gaussian_path is not None:
+                    gaussian_update_path = "{0}/gaussian.npy.gk".format(parameters.gaussian_path)
+                else:
+                    gaussian_update_path = None
 
-                if os.path.exists(gaussian_update_path):
+                if gaussian_update_path is not None and os.path.exists(gaussian_update_path):
                     print("Previous gaussian found!")
 
                     with gzip.GzipFile(gaussian_update_path, "r") as file:
@@ -335,13 +340,17 @@ def get_train_data():
 
                     gaussian_noise = data_mask_gaussian_noise + loss_mask_current_array
 
-                    gaussian_update_path = "{0}/gaussian.npy.gk".format(parameters.output_path)
+                    if parameters.gaussian_path is not None:
+                        gaussian_update_path = "{0}/gaussian.npy.gk".format(output_path)
 
-                    with gzip.GzipFile(gaussian_update_path, "w") as file:
-                        np.save(file, gaussian_noise)
+                        with gzip.GzipFile(gaussian_update_path, "w") as file:
+                            np.save(file, gaussian_noise)
 
             current_array = ((current_array + (parameters.input_gaussian_weight * gaussian_noise)) /
                              (1.0 + parameters.input_gaussian_weight))
+
+            if parameters.gaussian_path is not None:
+                gaussian_noise = None
 
         current_x_train_path = "{0}/{1}.npy.gz".format(x_train_output_path, str(i))
 
@@ -554,13 +563,15 @@ def train_step(model, optimiser, loss, x_train_iteration, y_train_iteration, los
             logits = logits * loss_mask_train_iteration
 
             # Compute the loss value for this minibatch.
-            current_loss = tf.math.reduce_sum([loss(y_train_iteration, logits),
+            current_loss = tf.math.reduce_sum([loss(current_y_train_iteration, logits),
                                                losses.scale_loss(y_train_iteration_jitter, logits),
                                                parameters.uncertainty_weight * uncertainty,
                                                parameters.kernel_regulariser_weight *
-                                               tf.math.reduce_mean(model.losses[::2]),
+                                               tf.math.reduce_mean(model.losses[::3]),
                                                parameters.activity_regulariser_weight *
-                                               tf.math.reduce_mean(model.losses[1::2])])
+                                               tf.math.reduce_mean(model.losses[1::3]),
+                                               parameters.prelu_regulariser_weight *
+                                               tf.math.reduce_mean(model.losses[2::3])])
 
         loss_list.append(current_loss)
 
@@ -827,7 +838,7 @@ def train_model():
     model, optimiser, loss = architecture.get_model_all(input_shape)
     model.summary()
 
-    model_update_path = "{0}/model.pkl".format(parameters.model_path)
+    model_update_path = "{0}/model.pkl".format(model_path)
 
     if os.path.exists(model_update_path):
         print("Previous model found!")
@@ -1149,11 +1160,14 @@ def train_model():
             current_window_uncertainty_data_paths.append(current_window_uncertainty_data_path)
 
             if parameters.new_model_window_bool:
-                with open("{0}/model.pkl".format(window_output_path), "wb") as file:
+                with open(model_path, "wb") as file:  # noqa
                     pickle.dump(model.get_weights(), file)
 
-                with open("{0}/optimiser.pkl".format(window_output_path), "wb") as file:
-                    pickle.dump(optimiser.get_weights(), file)
+                # with open("{0}/model.pkl".format(window_output_path), "wb") as file:
+                #     pickle.dump(model.get_weights(), file)
+
+                # with open("{0}/optimiser.pkl".format(window_output_path), "wb") as file:
+                #     pickle.dump(optimiser.get_weights(), file)
 
         try:
             output_paths.append(output_patient_time_point_predictions(current_window_data_paths, example_data,
@@ -1168,29 +1182,36 @@ def train_model():
                                                                                   "uncertainty", i))
 
             if parameters.new_model_patient_bool and not parameters.new_model_window_bool:
-                with open("{0}/model.pkl".format(patient_output_path), "wb") as file:
+                with open(model_path, "wb") as file:  # noqa
                     pickle.dump(model.get_weights(), file)
 
-                with open("{0}/optimiser.pkl".format(patient_output_path), "wb") as file:
-                    pickle.dump(optimiser.get_weights(), file)
+                # with open("{0}/model.pkl".format(patient_output_path), "wb") as file:
+                #     pickle.dump(model.get_weights(), file)
+
+                # with open("{0}/optimiser.pkl".format(patient_output_path), "wb") as file:
+                #     pickle.dump(optimiser.get_weights(), file)
         except:
             print("Error: Input not suitable; continuing")
 
     if not parameters.new_model_patient_bool and not parameters.new_model_window_bool:
-        with open("{0}/model.pkl".format(output_path), "wb") as file:
+        with open(model_path, "wb") as file:  # noqa
             pickle.dump(model.get_weights(), file)
 
-        with open("{0}/optimiser.pkl".format(output_path), "wb") as file:
-            pickle.dump(optimiser.get_weights(), file)
+        # with open("{0}/model.pkl".format(output_path), "wb") as file:
+        #     pickle.dump(model.get_weights(), file)
+
+        # with open("{0}/optimiser.pkl".format(output_path), "wb") as file:
+        #     pickle.dump(optimiser.get_weights(), file)
 
     return output_paths, output_uncertainty_paths
 
 
-def main(input_data_path=None, input_output_path=None):
+def main(input_data_path=None, input_output_path=None, input_model_path=None):
     print("main")
 
     global data_path
     global output_path
+    global model_path
 
     if input_data_path is not None:
         data_path = input_data_path
@@ -1201,6 +1222,11 @@ def main(input_data_path=None, input_output_path=None):
         output_path = input_output_path
     else:
         output_path = parameters.output_path
+
+    if input_model_path is not None:
+        model_path = input_model_path
+    else:
+        model_path = "{0}/model.pkl".format(output_path)
 
     # if debugging, remove previous output directory
     if input_output_path is None:
@@ -1229,7 +1255,7 @@ def main(input_data_path=None, input_output_path=None):
 
     # transcript.transcript_stop(logfile)
 
-    return output_paths, output_uncertainty_paths
+    return output_paths, output_uncertainty_paths, model_path
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ import numpy as np
 data_path = "{0}/DIP_RDP_data/static_thorax_simulation/".format(os.path.dirname(os.getcwd()))
 output_path = "{0}/output/static_thorax_simulation/".format(os.getcwd())
 
-gaussian_path = ""
+gaussian_path = None
 
 data_window_size = 128
 data_window_bool = True
@@ -25,7 +25,7 @@ data_gaussian_smooth_sigma_z = 0.0
 input_gaussian_weight = 1.0
 
 
-model_path = ""
+model_path = "{0}/model.pkl".format(output_path)
 
 layer_layers = [2, 2, 2, 2, 2, 2, 2, 2]
 layer_depth = [1, 2, 4, 8, 16, 32, 64, 128]
@@ -51,7 +51,7 @@ skip_gaussian_sigma = 0.0
 layer_gaussian_sigma = 0.0
 
 
-dropout = 0.0 / layer_depth[-1]
+dropout = 2.0 / layer_depth[-1]
 
 bayesian_test_bool = False
 bayesian_output_bool = True
@@ -62,7 +62,7 @@ if bayesian_iterations < 2:
 
 
 total_variation_bool = True
-total_variation_weight = 0.0
+total_variation_weight = 1e-06
 
 relative_difference_bool = False
 relative_difference_weight = 0.0
@@ -75,9 +75,10 @@ uncertainty_weight = 0.0
 
 kernel_regulariser_weight = 0.0
 activity_regulariser_weight = 0.0
+prelu_regulariser_weight = 1e-01
 
 
-weight_decay = 0.0
+weight_decay = 1e-05
 
 
 backtracking_weight_percentage = 0.0

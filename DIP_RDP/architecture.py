@@ -200,9 +200,9 @@ def get_optimiser():
     print("get_optimiser")
 
     if parameters.weight_decay > 0.0:
-        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Adam)(weight_decay=parameters.weight_decay, amsgrad=True, clipvalue=6.0)  # noqa
+        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Adam)(weight_decay=parameters.weight_decay, amsgrad=True, clipnorm=1.0)  # noqa
     else:
-        optimiser = tf.keras.optimizers.Adam(amsgrad=True, clipvalue=6.0)
+        optimiser = tf.keras.optimizers.Adam(amsgrad=True, clipnorm=1.0)
 
     return optimiser
 

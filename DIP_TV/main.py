@@ -66,8 +66,8 @@ if gpus:
         tf.config.experimental.set_memory_growth(gpu, True)
 
 
-data_path = "{0}/DIP_RDP_data/static_mean_thorax_simulation_noisy/".format(os.path.dirname(os.getcwd()))
-output_path = "{0}/output/DIP_TV/".format(os.getcwd())
+data_path = parameters.data_path
+output_path = parameters.output_path
 
 
 # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -421,12 +421,18 @@ def train_model():
                 gt_prediction = None
 
             iteration = 0
-            loss_array = []
+            loss_list = []
+
+            total_gt_current_accuracy = None
+            max_accuracy = tf.cast(0.0, dtype=tf.float32)
+            max_accuracy_iteration = 0
 
             while True:
                 print("Iteration:\t{0}".format(str(iteration)))
 
                 loss = model.train_on_batch(x_train_iteration, {"output": y_train_iteration}, reset_metrics=False)
+
+                total_current_accuracy = loss[1]
 
                 print("Loss:\t{0:<20}\tAccuracy:\t{1:<20}".format(str(loss[0]), str(loss[1])))
 
@@ -435,7 +441,17 @@ def train_model():
                 if gt is not None:
                     gt_accuracy = get_evaluation_score(x_prediction, gt_prediction)
 
-                    print("GT accuracy:\t{0}".format(str(gt_accuracy)))
+                    total_gt_current_accuracy = gt_accuracy
+
+                    print("GT accuracy:\t{0}".format(str(total_gt_current_accuracy)))
+
+                    if max_accuracy < total_gt_current_accuracy:
+                        max_accuracy = total_gt_current_accuracy
+                        max_accuracy_iteration = len(loss_list)
+                else:
+                    if max_accuracy < total_current_accuracy:
+                        max_accuracy = total_current_accuracy
+                        max_accuracy_iteration = len(loss_list)
 
                 x_prediction = np.squeeze(x_prediction).astype(np.float64)
                 y_plot = np.squeeze(y_train_iteration).astype(np.float64)
@@ -463,18 +479,15 @@ def train_model():
                     plt.imshow(gt_plot[:, :, int(gt_plot.shape[2] / 2)], cmap="Greys")
 
                 plt.tight_layout()
-                plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)),
-                            format="png", dpi=600, bbox_inches="tight")
+                plt.savefig("{0}/{1}.png".format(plot_output_path, str(iteration)), format="png", dpi=600,
+                            bbox_inches="tight")
                 plt.close()
 
+                loss_list.append(loss[0])
+
                 if parameters.total_variation_bool:
-                    if len(loss_array) >= parameters.patience:
-                        loss_array.pop(0)
-
-                    loss_array.append(loss[0])
-
-                    if len(loss_array) >= parameters.patience:
-                        loss_gradient = np.gradient(loss_array)
+                    if len(loss_list) >= parameters.patience:
+                        loss_gradient = np.gradient(loss_list[-parameters.patience:])[-parameters.patience:]
 
                         if np.allclose(loss_gradient, np.zeros(loss_gradient.shape), atol=parameters.plateau_cutoff):
                             print("Reached plateau: Exiting...")
@@ -487,6 +500,15 @@ def train_model():
                         break
 
                 iteration = iteration + 1
+
+            print("Maximum accuracy:\t{0:<20}\tMaximum accuracy iteration:\t{1:<20}".format(str(max_accuracy), str(max_accuracy_iteration)))
+
+            if gt is not None:
+                accuracy_loss = np.abs(total_gt_current_accuracy - max_accuracy)
+            else:
+                accuracy_loss = np.abs(total_current_accuracy - max_accuracy)
+
+            print("Accuracy loss:\t{0:<20}".format(str(accuracy_loss)))
 
             current_window_data_paths.append(output_window_predictions(x_prediction, input_volume, window_input_shape,
                                                                        input_preprocessing, window_output_path, i, j))

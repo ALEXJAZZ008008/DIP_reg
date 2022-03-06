@@ -26,73 +26,71 @@ def log_cosh_loss(y_true, y_pred):
     return tf.math.reduce_mean(_log_cosh(y_pred - y_true))
 
 
-def total_variation(images):
-    def _log_cosh(x):
-        return (x + tf.math.softplus(-2.0 * x)) - tf.math.log(2.0)
-
+# https://github.com/tensorflow/tensorflow/blob/v2.6.0/tensorflow/python/ops/image_ops_impl.py#L3213-L3282
+# def total_variation(images):
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
 
     # Calculate the difference of neighboring pixel-values.
     # The images are shifted one pixel along the height, width and depth by slicing.
-    pixel_dif1 = _log_cosh(images[:, 1:, :, :, :] - images[:, :-1, :, :, :])
-    pixel_dif2 = _log_cosh(images[:, :, 1:, :, :] - images[:, :, :-1, :, :])
-    pixel_dif3 = _log_cosh(images[:, :, :, 1:, :] - images[:, :, :, :-1, :])
+#     pixel_dif1 = images[:, 1:, :, :, :] - images[:, :-1, :, :, :]
+#     pixel_dif2 = images[:, :, 1:, :, :] - images[:, :, :-1, :, :]
+#     pixel_dif3 = images[:, :, :, 1:, :] - images[:, :, :, :-1, :]
 
     # Only sum for the last 4 axis.
     # This results in a 1-D tensor with the total variation for each image.
-    sum_axis = [1, 2, 3, 4]
+#     sum_axis = [1, 2, 3, 4]
 
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences and summing over the appropriate axis.
-    tot_var = tf.reduce_mean((tf.math.reduce_mean(tf.math.abs(pixel_dif1), axis=sum_axis) +
-                              tf.math.reduce_mean(tf.math.abs(pixel_dif2), axis=sum_axis) +
-                              tf.math.reduce_mean(tf.math.abs(pixel_dif3), axis=sum_axis)))
+#     tot_var = tf.reduce_mean((tf.math.reduce_mean(tf.math.abs(pixel_dif1), axis=sum_axis) +
+#                               tf.math.reduce_mean(tf.math.abs(pixel_dif2), axis=sum_axis) +
+#                               tf.math.reduce_mean(tf.math.abs(pixel_dif3), axis=sum_axis)))
 
-    return tot_var
-
-
-def total_variation_loss(_, y_pred):
-    y_pred = tf.cast(y_pred, dtype=tf.float32)
-
-    return parameters.total_variation_weight * tf.reduce_mean(total_variation(y_pred))
+#     return tot_var
 
 
 # def total_variation_loss(_, y_pred):
-#     def _pixel_dif_one_distance(n):
-#         return 1.0 / tf.cast(n, dtype=tf.float32)
+#     y_pred = tf.cast(y_pred, dtype=tf.float32)
 
-#     def _pixel_dif_one_1(x, n):
-#         return _pixel_dif_one_distance(n) * log_cosh_loss(x[:, n:, :, :, :], x[:, :-n, :, :, :])
+#     return parameters.total_variation_weight * tf.reduce_mean(total_variation(y_pred))
 
-#     def _pixel_dif_one_2(x, n):
-#         return _pixel_dif_one_distance(n) * log_cosh_loss(x[:, :, n:, :, :], x[:, :, :-n, :, :])
 
-#     def _pixel_dif_one_3(x, n):
-#         return _pixel_dif_one_distance(n) * log_cosh_loss(x[:, :, :, n:, :], x[:, :, :, :-n, :])
+def total_variation_loss(_, y_pred):
+    def _pixel_dif_one_distance(n):
+        return 1.0 / tf.cast(n, dtype=tf.float32)
 
-#     def _pixel_dif_two_distance(n1, n2):
-#         return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
-#                                   tf.math.square(tf.cast(n2, dtype=tf.float32)))
+    def _pixel_dif_one_1(x, n):
+        return _pixel_dif_one_distance(n) * log_cosh_loss(x[:, n:, :, :, :], x[:, :-n, :, :, :])
 
-#     def _pixel_dif_two_1(x, n1, n2):
-#         return _pixel_dif_two_distance(n1, n2) * log_cosh_loss(x[:, n1:, n2:, :, :], x[:, :-n1, :-n2, :, :])
+    def _pixel_dif_one_2(x, n):
+        return _pixel_dif_one_distance(n) * log_cosh_loss(x[:, :, n:, :, :], x[:, :, :-n, :, :])
 
-#     def _pixel_dif_two_2(x, n1, n2):
-#         return _pixel_dif_two_distance(n1, n2) * log_cosh_loss(x[:, n1:, :, n2:, :], x[:, :-n1, :, :-n2, :])
+    def _pixel_dif_one_3(x, n):
+        return _pixel_dif_one_distance(n) * log_cosh_loss(x[:, :, :, n:, :], x[:, :, :, :-n, :])
 
-#     def _pixel_dif_two_3(x, n1, n2):
-#         return _pixel_dif_two_distance(n1, n2) * log_cosh_loss(x[:, :, n1:, n2:, :], x[:, :, :-n1, :-n2, :])
+    def _pixel_dif_two_distance(n1, n2):
+        return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n2, dtype=tf.float32)))
 
-#     def _pixel_dif_three_distance(n1, n2, n3):
-#         return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
-#                                   tf.math.square(tf.cast(n2, dtype=tf.float32)) +
-#                                   tf.math.square(tf.cast(n3, dtype=tf.float32)))
+    def _pixel_dif_two_1(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * log_cosh_loss(x[:, n1:, n2:, :, :], x[:, :-n1, :-n2, :, :])
 
-#     def _pixel_dif_three_1(x, n1, n2, n3):
-#         return _pixel_dif_three_distance(n1, n2, n3) * log_cosh_loss(x[:, n1:, n2:, n3:, :], x[:, :-n1, :-n2, :-n3, :])
+    def _pixel_dif_two_2(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * log_cosh_loss(x[:, n1:, :, n2:, :], x[:, :-n1, :, :-n2, :])
 
-#     y_pred = y_pred - tf.math.reduce_min(y_pred)
+    def _pixel_dif_two_3(x, n1, n2):
+        return _pixel_dif_two_distance(n1, n2) * log_cosh_loss(x[:, :, n1:, n2:, :], x[:, :, :-n1, :-n2, :])
+
+    def _pixel_dif_three_distance(n1, n2, n3):
+        return 1.0 / tf.math.sqrt(tf.math.square(tf.cast(n1, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n2, dtype=tf.float32)) +
+                                  tf.math.square(tf.cast(n3, dtype=tf.float32)))
+
+    def _pixel_dif_three_1(x, n1, n2, n3):
+        return _pixel_dif_three_distance(n1, n2, n3) * log_cosh_loss(x[:, n1:, n2:, n3:, :], x[:, :-n1, :-n2, :-n3, :])
+
+    y_pred = y_pred - tf.math.reduce_min(y_pred)
 
     # The input is a batch of images with shape:
     # [batch, height, width, depth, channels].
@@ -102,13 +100,13 @@ def total_variation_loss(_, y_pred):
     # Calculate the total variation by taking the absolute value of the
     # pixel-differences summing over the appropriate axis.
 
-#     return tf.reduce_mean(tf.stack([_pixel_dif_one_1(y_pred, 1),
-#                                     _pixel_dif_one_2(y_pred, 1),
-#                                     _pixel_dif_one_3(y_pred, 1),
-#                                     _pixel_dif_two_1(y_pred, 1, 1),
-#                                     _pixel_dif_two_2(y_pred, 1, 1),
-#                                     _pixel_dif_two_3(y_pred, 1, 1),
-#                                     _pixel_dif_three_1(y_pred, 1, 1, 1)]))
+    return tf.reduce_mean(tf.stack([_pixel_dif_one_1(y_pred, 1),
+                                    _pixel_dif_one_2(y_pred, 1),
+                                    _pixel_dif_one_3(y_pred, 1),
+                                    _pixel_dif_two_1(y_pred, 1, 1),
+                                    _pixel_dif_two_2(y_pred, 1, 1),
+                                    _pixel_dif_two_3(y_pred, 1, 1),
+                                    _pixel_dif_three_1(y_pred, 1, 1, 1)]))
 
 
 def log_cosh_total_variation_loss(y_true, y_pred):
@@ -231,6 +229,12 @@ def log_cosh_regulariser(weight_matrix):
     weight_matrix = tf.cast(weight_matrix, dtype=tf.float32)
 
     return tf.math.reduce_mean(_log_cosh(weight_matrix))
+
+
+def l1_regulariser(weight_matrix):
+    weight_matrix = tf.cast(weight_matrix, dtype=tf.float32)
+
+    return tf.math.reduce_mean(tf.math.abs(weight_matrix))
 
 
 def correlation_coefficient_loss(y_true, y_pred):
