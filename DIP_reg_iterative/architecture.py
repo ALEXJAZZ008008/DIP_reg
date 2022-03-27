@@ -9,11 +9,11 @@ import tensorflow_addons as tfa
 import keras as k
 
 
-import DIP_RDP
+import DIP_RDP_iterative
 
-if DIP_RDP.reproducible_bool:
+if DIP_RDP_iterative.reproducible_bool:
     # 4. Set `tensorflow` pseudo-random generator at a fixed value
-    tf.random.set_seed(DIP_RDP.seed_value)
+    tf.random.set_seed(DIP_RDP_iterative.seed_value)
 
 
 import parameters
@@ -69,8 +69,7 @@ def get_encoder(x):
         x1 = layers.get_convolution_layer(x, layer_depth[i], (3, 3, 3), (2, 2, 2), layer_groups[i])
 
         x2 = tf.keras.layers.MaxPooling3D(pool_size=(2, 2, 2),
-                                          strides=(2, 2, 2),
-                                          padding="valid")(x)
+                                          strides=(2, 2, 2))(x)
 
         x = tf.keras.layers.Concatenate()([x1, x2])
 
@@ -128,13 +127,22 @@ def get_decoder(x, unet_connections):
     layer_groups.reverse()
 
     for i in range(len(layer_depth)):
-        x = layers.get_transpose_convolution_layer(x, layer_depth[i], (3, 3, 3), (1, 1, 1), layer_groups[i])
+        x = tf.keras.layers.UpSampling3D(size=(2, 2, 2))(x)
 
-        x = tf.keras.layers.UpSampling3D(size=tuple([x * 2 for x in (2, 2, 2)]))(x)
+        linear_kernel = tf.constant([[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]],
+                                     [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]],
+                                     [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]], dtype=tf.float16)
+        linear_kernel = linear_kernel / tf.math.reduce_sum(linear_kernel)
+        linear_kernel = linear_kernel[:, :, :, tf.newaxis, tf.newaxis]
 
-        x = tf.keras.layers.AveragePooling3D(pool_size=(2, 2, 2),
-                                             strides=(2, 2, 2),
-                                             padding="valid")(x)
+        for j in range(x.shape[-1] - 1):
+            linear_kernel = tf.pad(linear_kernel, [[0, 0], [0, 0], [0, 0], [0, 1], [0, 1]], "SYMMETRIC")
+
+        x = layers.get_padding(x, (3, 3, 3))
+        x = tf.keras.layers.Lambda(tf.nn.conv3d, arguments={"filters": linear_kernel,
+                                                            "strides": [1, 1, 1, 1, 1],
+                                                            "padding": "VALID",
+                                                            "dilations": [1, 1, 1, 1, 1]})(x)
 
         x = tf.keras.layers.Concatenate()([x, unet_connections.pop()])
 
@@ -163,10 +171,10 @@ def get_tensors(input_shape):
     x, input_x = get_input(input_shape)
 
     x, unet_connections = get_encoder(x)
-    x, latnet_x = get_latent(x)
+    x, latent_x = get_latent(x)
     output_x = get_decoder(x, unet_connections)
 
-    return input_x, latnet_x, output_x
+    return input_x, latent_x, output_x
 
 
 def get_model_all(input_shape):
@@ -186,7 +194,7 @@ def get_model_all(input_shape):
 def get_model(input_shape):
     print("get_model")
 
-    input_x, latnet_x, output_x = get_tensors(input_shape)
+    input_x, latent_x, output_x = get_tensors(input_shape)
 
     model = k.Model(inputs=input_x, outputs=[output_x])
 
@@ -200,9 +208,9 @@ def get_optimiser():
     print("get_optimiser")
 
     if parameters.weight_decay > 0.0:
-        optimiser = tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Adam)(weight_decay=parameters.weight_decay, amsgrad=True, clipnorm=1.0)  # noqa
+        optimiser = tf.keras.mixed_precision.LossScaleOptimizer(tfa.optimizers.extend_with_decoupled_weight_decay(tf.keras.optimizers.Adam)(weight_decay=parameters.weight_decay, amsgrad=True, clipnorm=1.0))  # noqa
     else:
-        optimiser = tf.keras.optimizers.Adam(amsgrad=True, clipnorm=1.0)
+        optimiser = tf.keras.mixed_precision.LossScaleOptimizer(tf.keras.optimizers.Adam(amsgrad=True, clipnorm=1.0))
 
     return optimiser
 
@@ -210,12 +218,9 @@ def get_optimiser():
 def get_loss():
     print("get_loss")
 
-    if parameters.relative_difference_bool:
-        loss = losses.log_cosh_relative_difference_loss
+    if parameters.total_variation_bool:
+        loss = losses.scaled_mean_squared_error_total_variation_loss
     else:
-        if parameters.total_variation_bool:
-            loss = losses.log_cosh_total_variation_loss
-        else:
-            loss = losses.log_cosh_loss
+        loss = losses.scaled_mean_squared_error_loss
 
     return loss

@@ -4,17 +4,20 @@
 
 
 import math
+import random
 import numpy as np
 import scipy.ndimage
 from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
+import elasticdeform
 import gzip
 
 
-import TV
+import DIP_RDP_iterative
 
-if TV.reproducible_bool:
+if DIP_RDP_iterative.reproducible_bool:
     # 3. Set `numpy` pseudo-random generator at a fixed value
-    np.random.seed(TV.seed_value)
+    np.random.seed(DIP_RDP_iterative.seed_value)
 
 
 import parameters
@@ -348,39 +351,200 @@ def data_preprocessing(data, data_type, preprocessing_steps=None):
     print("data_preprocessing")
 
     if preprocessing_steps is None:
-        preprocessing_steps = []
+        preprocessing_steps = StandardScaler()
 
-        for _ in range(len(data)):
-            preprocessing_steps.append(None)
-
-    for i in range(len(data)):
-        if data_type == "path":
-            with gzip.GzipFile(data[i], "r") as file:
-                data_copy = np.load(file)
-        else:
-            if data_type == "numpy":
-                data_copy = data[i].copy()
+        for i in range(len(data)):
+            if data_type == "path":
+                with gzip.GzipFile(data[i], "r") as file:
+                    data_copy = np.load(file)
             else:
-                data_copy = None
+                if data_type == "numpy":
+                    data_copy = data[i].copy()
+                else:
+                    data_copy = None
 
-        data_copy_shape = data_copy.shape
-        data_copy = data_copy.reshape(-1, 1)
+            data_copy = data_copy.reshape(-1, 1)
 
-        if preprocessing_steps[i] is None:
-            current_preprocessing_steps = [StandardScaler(copy=False)]
-            data_copy = current_preprocessing_steps[-1].fit_transform(data_copy)
+            preprocessing_steps.partial_fit(data_copy)
 
-            preprocessing_steps[i] = current_preprocessing_steps
-        else:
-            data_copy = preprocessing_steps[i][0].inverse_transform(data_copy)
+        for i in range(len(data)):
+            if data_type == "path":
+                with gzip.GzipFile(data[i], "r") as file:
+                    data_copy = np.load(file)
+            else:
+                if data_type == "numpy":
+                    data_copy = data[i].copy()
+                else:
+                    data_copy = None
 
-        data_copy = data_copy.reshape(data_copy_shape)
+            data_copy_shape = data_copy.shape
+            data_copy = data_copy.reshape(-1, 1)
 
-        if data_type == "path":
-            with gzip.GzipFile(data[i], "w") as file:
-                np.save(file, data_copy)
-        else:
-            if data_type == "numpy":
-                data[i] = data_copy
+            data_copy = preprocessing_steps.transform(data_copy)
+
+            data_copy = data_copy.reshape(data_copy_shape)
+
+            if data_type == "path":
+                with gzip.GzipFile(data[i], "w") as file:
+                    np.save(file, data_copy)
+            else:
+                if data_type == "numpy":
+                    data[i] = data_copy
+    else:
+        for i in range(len(data)):
+            if data_type == "path":
+                with gzip.GzipFile(data[i], "r") as file:
+                    data_copy = np.load(file)
+            else:
+                if data_type == "numpy":
+                    data_copy = data[i].copy()
+                else:
+                    data_copy = None
+
+            data_copy_shape = data_copy.shape
+            data_copy = data_copy.reshape(-1, 1)
+
+            data_copy = preprocessing_steps.inverse_transform(data_copy)
+
+            data_copy = data_copy.reshape(data_copy_shape)
+
+            if data_type == "path":
+                with gzip.GzipFile(data[i], "w") as file:
+                    np.save(file, data_copy)
+            else:
+                if data_type == "numpy":
+                    data[i] = data_copy
 
     return data, preprocessing_steps
+
+
+def introduce_jitter(x_train_iteration, y_train_iteration, loss_mask_train_iteration):
+    print("introduce_jitter")
+
+    x_train_iteration_jitter = x_train_iteration.numpy().astype(np.float64)
+    y_train_iteration_jitter = y_train_iteration.numpy().astype(np.float64)
+    loss_mask_train_iteration_jitter = loss_mask_train_iteration.numpy().astype(np.float64)
+
+    if parameters.jitter_magnitude > 0:
+        x_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
+        y_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
+        z_jitter = random.randint(-parameters.jitter_magnitude, parameters.jitter_magnitude)
+
+        if x_jitter < 0 or x_jitter > 0:
+            if x_jitter > 0:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, x_jitter:, :, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, x_jitter:, :, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, x_jitter:, :, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
+                                                  mode="edge")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
+                                                  mode="edge")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (x_jitter, 0), (0, 0), (0, 0), (0, 0)),
+                                                          mode="edge")
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :x_jitter, :, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :x_jitter, :, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :x_jitter, :, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
+                                                  mode="edge")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
+                                                  mode="edge")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, -x_jitter), (0, 0), (0, 0), (0, 0)),
+                                                          mode="edge")
+
+        if y_jitter < 0 or y_jitter > 0:
+            if y_jitter > 0:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, y_jitter:, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, y_jitter:, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, y_jitter:, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
+                                                  mode="edge")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
+                                                  mode="edge")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (y_jitter, 0), (0, 0), (0, 0)),
+                                                          mode="edge")
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, :y_jitter, :, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, :y_jitter, :, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, :y_jitter, :, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
+                                                  mode="edge")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
+                                                  mode="edge")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (0, -y_jitter), (0, 0), (0, 0)),
+                                                          mode="edge")
+
+        if z_jitter < 0 or z_jitter > 0:
+            if z_jitter > 0:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, z_jitter:, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, z_jitter:, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, :, z_jitter:, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
+                                                  mode="edge")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
+                                                  mode="edge")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (0, 0), (z_jitter, 0), (0, 0)),
+                                                          mode="edge")
+            else:
+                x_train_iteration_jitter = x_train_iteration_jitter[:, :, :, :z_jitter, :]
+                y_train_iteration_jitter = y_train_iteration_jitter[:, :, :, :z_jitter, :]
+                loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter[:, :, :, :z_jitter, :]
+
+                x_train_iteration_jitter = np.pad(x_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
+                                                  mode="edge")
+                y_train_iteration_jitter = np.pad(y_train_iteration_jitter,
+                                                  ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
+                                                  mode="edge")
+                loss_mask_train_iteration_jitter = np.pad(loss_mask_train_iteration_jitter,
+                                                          ((0, 0), (0, 0), (0, 0), (0, -z_jitter), (0, 0)),
+                                                          mode="edge")
+
+    if parameters.elastic_jitter_bool:
+        if parameters.elastic_jitter_sigma > 0.0:
+            points = np.asarray(x_train_iteration.shape.as_list())
+
+            for i in range(parameters.elastic_jitter_points_iterations):
+                points = np.ceil(points / 2.0)
+
+            points = points.astype(np.int).tolist()
+
+            [x_train_iteration_jitter, y_train_iteration_jitter, loss_mask_train_iteration_jitter] = \
+                elasticdeform.deform_random_grid([x_train_iteration_jitter, y_train_iteration_jitter,
+                                                  loss_mask_train_iteration_jitter],
+                                                 sigma=parameters.jitter_sigma, points=points, mode="edge")  # noqa
+
+    if DIP_RDP_iterative.float_sixteen_bool:
+        x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float16)
+        y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float16)
+        loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter.astype(np.float16)
+    else:
+        x_train_iteration_jitter = x_train_iteration_jitter.astype(np.float32)
+        y_train_iteration_jitter = y_train_iteration_jitter.astype(np.float32)
+        loss_mask_train_iteration_jitter = loss_mask_train_iteration_jitter.astype(np.float32)
+
+    x_train_iteration_jitter = tf.convert_to_tensor(x_train_iteration_jitter)
+    y_train_iteration_jitter = tf.convert_to_tensor(y_train_iteration_jitter)
+    loss_mask_train_iteration_jitter = tf.convert_to_tensor(loss_mask_train_iteration_jitter)
+
+    return x_train_iteration_jitter, y_train_iteration_jitter, loss_mask_train_iteration_jitter
